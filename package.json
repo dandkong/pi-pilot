@@ -1,0 +1,27 @@
+{
+  "name": "pi-pilot",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/markdown-it": "^14.1.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "grammy": "^1.42.0",
+    "markdown-it": "^14.1.1"
+  },
+  "trustedDependencies": [
+    "@google/genai",
+    "koffi",
+    "protobufjs"
+  ]
+}

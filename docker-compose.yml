@@ -1,0 +1,15 @@
+name: pi-pilot
+
+services:
+  pi-pilot:
+    build: .
+    image: pi-pilot:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PI_PILOT_CWD: ${PI_PILOT_CWD:-/workspace}
+      PI_PILOT_LOG_LEVEL: ${PI_PILOT_LOG_LEVEL:-info}
+    volumes:
+      - .:/workspace
+      - ${HOME}/.pi/agent:/home/bun/.pi/agent
