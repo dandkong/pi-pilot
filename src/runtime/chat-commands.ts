@@ -6,15 +6,19 @@ import type {
   TelegramCommand,
 } from "../adapters/types.ts";
 import type { ProviderModels, RunnerStatus } from "../pi/runner.ts";
+import type { SessionListItem } from "../pi/runner.ts";
 import type { ChatStateGetter } from "./chat-runtime.ts";
 
 const MODELS_HOME = "models:home";
+const RESUME_PREFIX = "resume";
 
 export const TELEGRAM_COMMANDS: TelegramCommand[] = [
   { command: "start", description: "Welcome and quick start" },
   { command: "help", description: "Show available commands" },
   { command: "status", description: "Show current session status" },
   { command: "models", description: "Choose model" },
+  { command: "resume", description: "Resume a previous session" },
+  { command: "new", description: "Start a new session" },
   { command: "stop", description: "Abort current task" },
   { command: "compact", description: "Compact context" },
 ];
@@ -46,6 +50,16 @@ export class ChatCommands {
 
     if (command === "models") {
       await this.sendModelProviders(message.chatId, message.messageId);
+      return true;
+    }
+
+    if (command === "resume") {
+      await this.sendResumeMenu(message.chatId, message.messageId);
+      return true;
+    }
+
+    if (command === "new") {
+      await this.sendNewSession(message.chatId, message.messageId);
       return true;
     }
 
@@ -95,6 +109,11 @@ export class ChatCommands {
 
       if (callback.data.startsWith("models:set:")) {
         await this.selectModel(callback);
+        return;
+      }
+
+      if (callback.data.startsWith(`${RESUME_PREFIX}:`)) {
+        await this.selectResumeSession(callback);
         return;
       }
 
@@ -161,6 +180,63 @@ export class ChatCommands {
       `Context compacted.\nContext: ${context}`,
       { replyToMessageId },
     );
+  }
+
+  private async sendResumeMenu(
+    chatId: string,
+    replyToMessageId?: string,
+  ): Promise<void> {
+    const state = await this.getChatState(chatId);
+    const sessions = await state.runner.listSessions();
+    if (!sessions.length) {
+      await this.adapter.sendMessage(chatId, "No previous sessions found.", { replyToMessageId });
+      return;
+    }
+    await this.adapter.sendMessage(chatId, formatResumeMenu(sessions), {
+      replyToMessageId,
+      buttons: resumeButtons(sessions),
+    });
+  }
+
+  private async sendNewSession(
+    chatId: string,
+    replyToMessageId?: string,
+  ): Promise<void> {
+    const state = await this.getChatState(chatId);
+    const runtimeStatus = await state.runner.getRuntimeStatus();
+    if (state.busy || runtimeStatus.isStreaming || state.queue.length > 0) {
+      await this.adapter.sendMessage(
+        chatId,
+        "Cannot start a new session while a task is running. Use /stop or wait for completion.",
+        { replyToMessageId },
+      );
+      return;
+    }
+
+    const sessionId = await state.runner.newSession();
+    await this.adapter.sendMessage(
+      chatId,
+      `New session started.\nSession: ${sessionId.slice(0, 8)}`,
+      { replyToMessageId },
+    );
+  }
+
+  private async selectResumeSession(callback: ChatCallback): Promise<void> {
+    const rawIndex = callback.data.slice(`${RESUME_PREFIX}:`.length);
+    const index = Number(rawIndex);
+    if (!Number.isInteger(index)) throw new Error("Invalid session index");
+
+    const state = await this.getChatState(callback.chatId);
+    const runtimeStatus = await state.runner.getRuntimeStatus();
+    if (state.busy || runtimeStatus.isStreaming || state.queue.length > 0) {
+      await this.adapter.answerCallback(callback, "Cannot switch session while a task is running");
+      return;
+    }
+
+    const target = await state.runner.switchSession(index);
+    const label = formatSessionLabel(target);
+    await this.editCallbackMessage(callback, `Resumed session:\n${label}`, []);
+    await this.adapter.answerCallback(callback, `Resumed ${target.id.slice(0, 8)}`);
   }
 
   private async sendStatus(
@@ -304,6 +380,40 @@ function formatProviderMenu(groups: ProviderModels[]): string {
   return "Choose a provider:";
 }
 
+function formatResumeMenu(sessions: SessionListItem[]): string {
+  if (!sessions.length) return "No previous sessions found.";
+  return [
+    "Resume a session:",
+    ...sessions.map((s) => formatSessionLabel(s)),
+  ].join("\n");
+}
+
+function formatSessionLabel(session: SessionListItem): string {
+  const id = session.id.slice(0, 8);
+  const msgs = `${session.messageCount} msg${session.messageCount === 1 ? "" : "s"}`;
+  const label = session.name || truncate(session.firstMessage, 40) || "(no messages)";
+  const time = formatRelativeTime(session.modified);
+  return `${id} • ${msgs} - ${label} • ${time}`;
+}
+
+function formatRelativeTime(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function resumeButtons(sessions: SessionListItem[]): InlineButton[][] {
+  return sessions.map((session, index) => [{
+    text: `${session.id.slice(0, 8)} - ${session.name || truncate(session.firstMessage, 20) || "(no messages)"}`,
+    callbackData: `${RESUME_PREFIX}:${index}`,
+  }]);
+}
+
 function formatModelMenu(group: ProviderModels): string {
   return `Choose a model from ${group.displayName}:`;
 }
@@ -328,6 +438,11 @@ function modelButtons(group: ProviderModels): InlineButton[][] {
   );
   rows.push([{ text: "Back to providers", callbackData: MODELS_HOME }]);
   return rows;
+}
+
+function truncate(value: string | undefined, limit = 100): string | undefined {
+  if (!value) return undefined;
+  return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
 
 function chunkButtons(

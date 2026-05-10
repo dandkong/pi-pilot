@@ -1,6 +1,17 @@
 # pi-pilot
 
-Minimal Telegram backend powered by the pi SDK.
+> Pi in your pocket. Code from anywhere.
+
+A Telegram bot that puts [pi](https://github.com/earendil-works/pi-mono) in your pocket — stream responses, switch models, manage sessions, all from a chat window.
+
+## Features
+
+- **Streaming replies** — watch the agent think and act in real time
+- **Model picker** — browse providers and switch models with inline buttons
+- **Session management** — resume previous sessions or start fresh ones
+- **Message queue** — send multiple requests; they're processed in order
+- **Context control** — compact context, abort tasks, check status
+- **One-process deployment** — runs on Bun, ships as a single Docker image
 
 ## Run
 
@@ -49,26 +60,39 @@ docker run --rm \
 
 In Docker, the bot code lives in `/app` and the default agent workspace is `/workspace`. Compose mounts this repository to `/workspace`; for another project, use `docker run --volume /path/to/project:/workspace` or edit the Compose volume.
 
-## Current Architecture
-
-- `src/adapters/telegram.ts` - Telegram adapter built on grammY: long polling, typing, draft streaming, replies, message chunking.
-- `src/runtime/chat-runtime.ts` - Per-chat in-memory state, FIFO message queue, and request dispatch.
-- `src/pi/runner.ts` - pi SDK session creation and prompt execution.
-- `src/config.ts` - app config, including `PI_PILOT_CWD` working directory support.
-
-## Storage
-
-- Chat history: in memory only, cleared on restart.
-- Pi config/auth/models/settings: pi defaults, for example `~/.pi/agent`; in Docker, mount this to `/home/bun/.pi/agent`.
-- Tools: pi SDK defaults; this app does not pass an explicit tool allowlist.
-
-## Usage
+## Commands
 
 Send `/start` for help, then send a coding request directly. While the agent is running, additional messages are queued and processed in order.
 
-Commands:
+| Command | Description |
+|---------|-------------|
+| `/status` | Show model, context usage, session stats, active tools |
+| `/models` | Browse providers and switch models with inline buttons |
+| `/resume` | Resume a previous session (lists 5 most recent) |
+| `/new` | Start a new session |
+| `/stop` | Abort the running task and clear queued messages |
+| `/compact` | Compact conversation context |
 
-- `/status` - Show current model, thinking level, context usage, cwd, session stats, and active tool count.
-- `/models` - Open an inline model picker: provider list first, then all available models for that provider.
-- `/stop` - Abort the current running task and clear queued messages.
-- `/compact` - Compact the conversation context.
+## Architecture
+
+```
+PiRunner (global)
+├── AuthStorage      — API keys, shared across workspaces
+├── ModelRegistry    — available models, shared across workspaces
+└── Workspace        — cwd-bound session management
+    ├── SettingsManager  — per-project preferences
+    └── AgentSession     — the active pi session
+```
+
+Switching sessions (`/resume`, `/new`) replaces the AgentSession within the current workspace. Future workspace switching would replace the entire Workspace while reusing global resources.
+
+## Storage
+
+- **Chat history** — in memory only, cleared on restart.
+- **Pi sessions** — persisted by pi SDK (`~/.pi/agent/sessions/`); in Docker, mount to `/home/bun/.pi/agent`.
+- **Pi config/auth** — pi defaults (`~/.pi/agent`); in Docker, mount to `/home/bun/.pi/agent`.
+- **Tools** — pi SDK defaults; no explicit tool allowlist.
+
+## License
+
+MIT

@@ -32,6 +32,15 @@ export type RunOptions = {
   onToolStart?: (event: ToolEvent) => void | Promise<void>;
 };
 
+export type SessionListItem = {
+  id: string;
+  name?: string;
+  path: string;
+  messageCount: number;
+  firstMessage: string;
+  modified: Date;
+};
+
 export type RunnerStatus = {
   cwd: string;
   sessionId: string;
@@ -60,12 +69,21 @@ export type RuntimeStatus = {
   isCompacting: boolean;
 };
 
-export class PiRunner {
+/**
+ * Workspace: cwd-bound session management.
+ * Owns settings, sessions, and agent session for a single working directory.
+ * Global resources (auth, model registry) are injected from PiRunner.
+ */
+class Workspace {
   private session: AgentSession | undefined;
-  private modelRegistry: ModelRegistry | undefined;
+  private settingsManager: SettingsManager | undefined;
   private initPromise: Promise<void> | undefined;
 
-  constructor(private readonly config: AppConfig) {}
+  constructor(
+    readonly cwd: string,
+    private readonly authStorage: AuthStorage,
+    private readonly modelRegistry: ModelRegistry,
+  ) {}
 
   async init(): Promise<void> {
     if (this.session) return;
@@ -135,7 +153,7 @@ export class PiRunner {
     const session = await this.getSession();
     const stats = session.getSessionStats();
     return {
-      cwd: this.config.cwd,
+      cwd: this.cwd,
       sessionId: session.sessionId,
       model: session.model,
       thinkingLevel: session.thinkingLevel,
@@ -154,8 +172,139 @@ export class PiRunner {
     };
   }
 
+  async getRuntimeStatus(): Promise<RuntimeStatus> {
+    const session = await this.getSession();
+    return {
+      isStreaming: session.isStreaming,
+      isCompacting: session.isCompacting,
+    };
+  }
+
+  async setModel(provider: string, modelIndex: number): Promise<ModelInfo> {
+    const session = await this.getSession();
+    const allModels = this.modelRegistry.getAvailable().sort(compareModels);
+    const providerModels = allModels.filter((m) => m.provider === provider);
+    const model = providerModels[modelIndex];
+    if (!model) throw new Error(`Unknown model selection: ${provider} #${modelIndex}`);
+
+    await session.setModel(model);
+    return model;
+  }
+
+  async abort(): Promise<void> {
+    const session = await this.getSession();
+    session.clearQueue();
+    await session.abort();
+  }
+
+  async compact(): Promise<void> {
+    const session = await this.getSession();
+    await session.compact();
+  }
+
+  async listSessions(): Promise<SessionListItem[]> {
+    const sessions = await SessionManager.list(this.cwd);
+    sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+    return sessions.slice(0, 5);
+  }
+
+  async switchSession(index: number): Promise<SessionListItem> {
+    const sessions = await this.listSessions();
+    const target = sessions[index];
+    if (!target) throw new Error(`Invalid session index: ${index}`);
+
+    this.session?.dispose();
+    this.session = undefined;
+
+    const sessionManager = SessionManager.open(target.path, undefined, this.cwd);
+    await this.createSession(sessionManager);
+
+    return target;
+  }
+
+  async newSession(): Promise<string> {
+    this.session?.dispose();
+    this.session = undefined;
+
+    const sessionManager = SessionManager.create(this.cwd);
+    await this.createSession(sessionManager);
+
+    return this.session!.sessionId;
+  }
+
+  dispose(): void {
+    this.session?.dispose();
+    this.session = undefined;
+    this.settingsManager = undefined;
+  }
+
+  private async createSession(sessionManager?: SessionManager): Promise<void> {
+    const settingsManager = this.settingsManager ?? SettingsManager.create(this.cwd);
+
+    if (!sessionManager) {
+      sessionManager = SessionManager.continueRecent(this.cwd);
+    }
+
+    const { session, modelFallbackMessage } = await createAgentSession({
+      cwd: this.cwd,
+      authStorage: this.authStorage,
+      modelRegistry: this.modelRegistry,
+      settingsManager,
+      sessionManager,
+    });
+
+    if (modelFallbackMessage) {
+      log.warn("model fallback", modelFallbackMessage);
+    }
+
+    this.settingsManager = settingsManager;
+    this.session = session;
+
+    const skills = session.resourceLoader.getSkills().skills;
+    log.info("session initialized", {
+      cwd: this.cwd,
+      sessionId: session.sessionId,
+      model: session.model ? `${session.model.provider}/${session.model.name}` : undefined,
+      thinkingLevel: session.thinkingLevel,
+      activeTools: session.getActiveToolNames(),
+      skills: skills.map((skill) => skill.name),
+    });
+  }
+
+  private async getSession(): Promise<AgentSession> {
+    await this.init();
+    if (!this.session) throw new Error("Pi session was not initialized");
+    return this.session;
+  }
+
+
+}
+
+/**
+ * PiRunner: global singleton that owns auth and model registry,
+ * delegates session work to the current Workspace.
+ */
+export class PiRunner {
+  private authStorage: AuthStorage | undefined;
+  private modelRegistry: ModelRegistry | undefined;
+  private workspace: Workspace | undefined;
+
+  constructor(private readonly config: AppConfig) {}
+
+  async init(): Promise<void> {
+    await this.getWorkspace().init();
+  }
+
+  async run(prompt: string, options?: RunOptions): Promise<string> {
+    return this.getWorkspace().run(prompt, options);
+  }
+
+  async getStatus(): Promise<RunnerStatus> {
+    return this.getWorkspace().getStatus();
+  }
+
   async getProviderModels(): Promise<ProviderModels[]> {
-    await this.getSession();
+    await this.getWorkspace().init();
     const registry = this.getModelRegistry();
     const models = registry.getAvailable().sort(compareModels);
     const groups = new Map<string, ModelInfo[]>();
@@ -174,75 +323,48 @@ export class PiRunner {
   }
 
   async setModel(provider: string, modelIndex: number): Promise<ModelInfo> {
-    const session = await this.getSession();
-    const providerModels = (await this.getProviderModels()).find((group) => group.provider === provider)?.models ?? [];
-    const model = providerModels[modelIndex];
-    if (!model) throw new Error(`Unknown model selection: ${provider} #${modelIndex}`);
-
-    await session.setModel(model);
-    return model;
+    return this.getWorkspace().setModel(provider, modelIndex);
   }
 
   async getRuntimeStatus(): Promise<RuntimeStatus> {
-    const session = await this.getSession();
-    return {
-      isStreaming: session.isStreaming,
-      isCompacting: session.isCompacting,
-    };
+    return this.getWorkspace().getRuntimeStatus();
   }
 
   async abort(): Promise<void> {
-    const session = await this.getSession();
-    session.clearQueue();
-    await session.abort();
+    return this.getWorkspace().abort();
   }
 
   async compact(): Promise<void> {
-    const session = await this.getSession();
-    await session.compact();
+    return this.getWorkspace().compact();
+  }
+
+  async listSessions(): Promise<SessionListItem[]> {
+    return this.getWorkspace().listSessions();
+  }
+
+  async switchSession(index: number): Promise<SessionListItem> {
+    return this.getWorkspace().switchSession(index);
+  }
+
+  async newSession(): Promise<string> {
+    return this.getWorkspace().newSession();
   }
 
   dispose(): void {
-    this.session?.dispose();
-    this.session = undefined;
+    this.workspace?.dispose();
+    this.workspace = undefined;
     this.modelRegistry = undefined;
+    this.authStorage = undefined;
   }
 
-  private async createSession(): Promise<void> {
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.create(authStorage);
-    const settingsManager = SettingsManager.create(this.config.cwd);
+  private getWorkspace(): Workspace {
+    if (!this.workspace) {
+      this.authStorage = this.authStorage ?? AuthStorage.create();
+      this.modelRegistry = this.modelRegistry ?? ModelRegistry.create(this.authStorage);
 
-    const { session, modelFallbackMessage } = await createAgentSession({
-      cwd: this.config.cwd,
-      authStorage,
-      modelRegistry,
-      settingsManager,
-      sessionManager: SessionManager.inMemory(),
-    });
-
-    if (modelFallbackMessage) {
-      log.warn("model fallback", modelFallbackMessage);
+      this.workspace = new Workspace(this.config.cwd, this.authStorage, this.modelRegistry);
     }
-
-    this.modelRegistry = modelRegistry;
-    this.session = session;
-
-    const skills = session.resourceLoader.getSkills().skills;
-    log.info("session initialized", {
-      cwd: this.config.cwd,
-      sessionId: session.sessionId,
-      model: session.model ? `${session.model.provider}/${session.model.name}` : undefined,
-      thinkingLevel: session.thinkingLevel,
-      activeTools: session.getActiveToolNames(),
-      skills: skills.map((skill) => skill.name),
-    });
-  }
-
-  private async getSession(): Promise<AgentSession> {
-    await this.init();
-    if (!this.session) throw new Error("Pi session was not initialized");
-    return this.session;
+    return this.workspace;
   }
 
   private getModelRegistry(): ModelRegistry {
@@ -275,7 +397,7 @@ function logAgentEvent(event: unknown): void {
     return;
   }
 
-  if (type === "auto_retry_start" || type === "auto_retry_end" || type === "compaction_start" || type === "compaction_end") {
+  if (type === "auto_retry_start" || type === "auto_retry_end" || type === "compaction" || type === "compaction_end") {
     log.info(String(type), typedEvent);
   }
 }
