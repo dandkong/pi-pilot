@@ -32,6 +32,19 @@ export class ChatRuntime {
   }
 
   async handleMessage(message: ChatMessage): Promise<void> {
+    if (!this.isAllowedUser(message.userId)) {
+      log.warn(`[chat ${message.chatId}] rejected unauthorized user`, {
+        userId: message.userId,
+        username: message.username,
+      });
+      await this.adapter.sendMessage(
+        message.chatId,
+        `Unauthorized user: ${message.userId}`,
+        { replyToMessageId: message.messageId },
+      );
+      return;
+    }
+
     if (await this.commands.handleMessage(message)) return;
 
     const prompt = message.text.trim();
@@ -45,11 +58,9 @@ export class ChatRuntime {
         messageId: message.messageId,
         queueLength: state.queue.length,
       });
-      await this.adapter.sendMessage(
-        message.chatId,
-        `Queued. Position: ${state.queue.length}`,
-        { replyToMessageId: message.messageId },
-      );
+      await this.adapter.sendMessage(message.chatId, "Queued.", {
+        replyToMessageId: message.messageId,
+      });
       return;
     }
 
@@ -57,6 +68,14 @@ export class ChatRuntime {
   }
 
   async handleCallback(callback: ChatCallback): Promise<void> {
+    if (!this.isAllowedUser(callback.userId)) {
+      log.warn(`[chat ${callback.chatId}] rejected unauthorized callback`, {
+        userId: callback.userId,
+      });
+      await this.adapter.answerCallback(callback, "Unauthorized user");
+      return;
+    }
+
     await this.commands.handleCallback(callback);
   }
 
@@ -66,6 +85,11 @@ export class ChatRuntime {
       state.runner.dispose();
     }
     this.chats.clear();
+  }
+
+  private isAllowedUser(userId: string): boolean {
+    const allowed = this.config.allowedTelegramUsers;
+    return allowed.length === 0 || allowed.includes(userId);
   }
 
   private async getChatState(chatId: string): Promise<ChatState> {
@@ -222,8 +246,8 @@ function formatToolStart(event: ToolEvent): string {
 function toolIcon(toolName: string): string {
   if (toolName === "read") return "📖";
   if (toolName === "bash") return "💻";
-  if (toolName === "edit") return "✏️";
-  if (toolName === "write") return "📝";
+  if (toolName === "edit") return "📝";
+  if (toolName === "write") return "✏️";
   return "🔧";
 }
 

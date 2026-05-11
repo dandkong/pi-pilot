@@ -9,6 +9,7 @@ services:
       - .env
     environment:
       PI_PILOT_CWD: ${PI_PILOT_CWD:-/workspace}
+      PI_PILOT_WORKSPACES: ${PI_PILOT_WORKSPACES:-}
       PI_PILOT_LOG_LEVEL: ${PI_PILOT_LOG_LEVEL:-info}
     volumes:
       - .:/workspace

@@ -41,6 +41,12 @@ export type SessionListItem = {
   modified: Date;
 };
 
+export type WorkspaceListItem = {
+  index: number;
+  cwd: string;
+  current: boolean;
+};
+
 export type RunnerStatus = {
   cwd: string;
   sessionId: string;
@@ -288,8 +294,11 @@ export class PiRunner {
   private authStorage: AuthStorage | undefined;
   private modelRegistry: ModelRegistry | undefined;
   private workspace: Workspace | undefined;
+  private currentCwd: string;
 
-  constructor(private readonly config: AppConfig) {}
+  constructor(private readonly config: AppConfig) {
+    this.currentCwd = config.cwd;
+  }
 
   async init(): Promise<void> {
     await this.getWorkspace().init();
@@ -342,6 +351,28 @@ export class PiRunner {
     return this.getWorkspace().listSessions();
   }
 
+  listWorkspaces(): WorkspaceListItem[] {
+    return this.config.workspaces.map((cwd, index) => ({
+      index,
+      cwd,
+      current: cwd === this.currentCwd,
+    }));
+  }
+
+  async switchWorkspace(index: number): Promise<WorkspaceListItem> {
+    const cwd = this.config.workspaces[index];
+    if (!cwd) throw new Error(`Invalid workspace index: ${index}`);
+
+    if (cwd !== this.currentCwd) {
+      this.workspace?.dispose();
+      this.workspace = undefined;
+      this.currentCwd = cwd;
+      await this.getWorkspace().init();
+    }
+
+    return { index, cwd, current: true };
+  }
+
   async switchSession(index: number): Promise<SessionListItem> {
     return this.getWorkspace().switchSession(index);
   }
@@ -355,6 +386,7 @@ export class PiRunner {
     this.workspace = undefined;
     this.modelRegistry = undefined;
     this.authStorage = undefined;
+    this.currentCwd = this.config.cwd;
   }
 
   private getWorkspace(): Workspace {
@@ -362,7 +394,7 @@ export class PiRunner {
       this.authStorage = this.authStorage ?? AuthStorage.create();
       this.modelRegistry = this.modelRegistry ?? ModelRegistry.create(this.authStorage);
 
-      this.workspace = new Workspace(this.config.cwd, this.authStorage, this.modelRegistry);
+      this.workspace = new Workspace(this.currentCwd, this.authStorage, this.modelRegistry);
     }
     return this.workspace;
   }

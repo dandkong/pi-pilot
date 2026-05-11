@@ -6,21 +6,23 @@ import type {
   TelegramCommand,
 } from "../adapters/types.ts";
 import type { ProviderModels, RunnerStatus } from "../pi/runner.ts";
-import type { SessionListItem } from "../pi/runner.ts";
+import type { SessionListItem, WorkspaceListItem } from "../pi/runner.ts";
 import type { ChatStateGetter } from "./chat-runtime.ts";
 
 const MODELS_HOME = "models:home";
 const RESUME_PREFIX = "resume";
+const WORKSPACE_PREFIX = "workspace";
 
 export const TELEGRAM_COMMANDS: TelegramCommand[] = [
-  { command: "start", description: "Welcome and quick start" },
-  { command: "help", description: "Show available commands" },
   { command: "status", description: "Show current session status" },
+  { command: "workspaces", description: "Switch workspace" },
   { command: "models", description: "Choose model" },
   { command: "resume", description: "Resume a previous session" },
   { command: "new", description: "Start a new session" },
   { command: "stop", description: "Abort current task" },
   { command: "compact", description: "Compact context" },
+  { command: "start", description: "Welcome and quick start" },
+  { command: "help", description: "Show available commands" },
 ];
 
 export class ChatCommands {
@@ -50,6 +52,11 @@ export class ChatCommands {
 
     if (command === "models") {
       await this.sendModelProviders(message.chatId, message.messageId);
+      return true;
+    }
+
+    if (command === "workspaces") {
+      await this.sendWorkspaceMenu(message.chatId, message.messageId);
       return true;
     }
 
@@ -117,6 +124,11 @@ export class ChatCommands {
         return;
       }
 
+      if (callback.data.startsWith(`${WORKSPACE_PREFIX}:`)) {
+        await this.selectWorkspace(callback);
+        return;
+      }
+
       await this.adapter.answerCallback(callback, "Unknown action");
     } catch (error) {
       console.error(`[chat ${callback.chatId}] callback failed`, error);
@@ -170,10 +182,23 @@ export class ChatCommands {
       return;
     }
 
-    await state.runner.compact();
-    await this.adapter.sendMessage(chatId, "Context compacted.", {
+    const [message] = await this.adapter.sendMessage(chatId, "Compacting context...", {
       replyToMessageId,
     });
+
+    try {
+      await state.runner.compact();
+      if (message) {
+        await this.adapter.editMessage(chatId, message.messageId, "Context compacted.");
+      } else {
+        await this.adapter.sendMessage(chatId, "Context compacted.", { replyToMessageId });
+      }
+    } catch (error) {
+      if (message) {
+        await this.adapter.editMessage(chatId, message.messageId, "Context compaction failed.");
+      }
+      throw error;
+    }
   }
 
   private async sendResumeMenu(
@@ -192,16 +217,28 @@ export class ChatCommands {
     });
   }
 
+  private async sendWorkspaceMenu(
+    chatId: string,
+    replyToMessageId?: string,
+  ): Promise<void> {
+    const state = await this.getChatState(chatId);
+    const workspaces = state.runner.listWorkspaces();
+    await this.adapter.sendMessage(chatId, formatWorkspaceMenu(workspaces), {
+      replyToMessageId,
+      buttons: workspaceButtons(workspaces),
+    });
+  }
+
   private async sendNewSession(
     chatId: string,
     replyToMessageId?: string,
   ): Promise<void> {
     const state = await this.getChatState(chatId);
     const runtimeStatus = await state.runner.getRuntimeStatus();
-    if (state.busy || runtimeStatus.isStreaming || state.queue.length > 0) {
+    if (state.busy || runtimeStatus.isStreaming || runtimeStatus.isCompacting || state.queue.length > 0) {
       await this.adapter.sendMessage(
         chatId,
-        "Cannot start a new session while a task is running. Use /stop or wait for completion.",
+        "Cannot start a new session while a task is running or compaction is in progress. Use /stop or wait for completion.",
         { replyToMessageId },
       );
       return;
@@ -222,7 +259,7 @@ export class ChatCommands {
 
     const state = await this.getChatState(callback.chatId);
     const runtimeStatus = await state.runner.getRuntimeStatus();
-    if (state.busy || runtimeStatus.isStreaming || state.queue.length > 0) {
+    if (state.busy || runtimeStatus.isStreaming || runtimeStatus.isCompacting || state.queue.length > 0) {
       await this.adapter.answerCallback(callback, "Cannot switch session while a task is running");
       return;
     }
@@ -231,6 +268,23 @@ export class ChatCommands {
     const label = formatSessionLabel(target);
     await this.editCallbackMessage(callback, `Resumed session:\n${label}`, []);
     await this.adapter.answerCallback(callback, `Resumed ${target.id.slice(0, 8)}`);
+  }
+
+  private async selectWorkspace(callback: ChatCallback): Promise<void> {
+    const rawIndex = callback.data.slice(`${WORKSPACE_PREFIX}:`.length);
+    const index = Number(rawIndex);
+    if (!Number.isInteger(index)) throw new Error("Invalid workspace index");
+
+    const state = await this.getChatState(callback.chatId);
+    const runtimeStatus = await state.runner.getRuntimeStatus();
+    if (state.busy || runtimeStatus.isStreaming || runtimeStatus.isCompacting || state.queue.length > 0) {
+      await this.adapter.answerCallback(callback, "Cannot switch workspace while a task is running");
+      return;
+    }
+
+    const workspace = await state.runner.switchWorkspace(index);
+    await this.editCallbackMessage(callback, `Workspace selected:\nCWD: ${workspace.cwd}`, []);
+    await this.adapter.answerCallback(callback, "Workspace selected");
   }
 
   private async sendStatus(
@@ -375,11 +429,20 @@ function formatProviderMenu(groups: ProviderModels[]): string {
   return "Choose a provider:";
 }
 
+function formatWorkspaceMenu(workspaces: WorkspaceListItem[]): string {
+  return [
+    "Choose workspace:",
+    ...workspaces.map((workspace, index) =>
+      `${index + 1}. ${workspace.cwd}${workspace.current ? " (current)" : ""}`,
+    ),
+  ].join("\n");
+}
+
 function formatResumeMenu(sessions: SessionListItem[]): string {
   if (!sessions.length) return "No previous sessions found.";
   return [
     "Resume a session:",
-    ...sessions.map((s) => formatSessionLabel(s)),
+    ...sessions.map((s, index) => `${index + 1}. ${formatSessionLabel(s)}`),
   ].join("\n");
 }
 
@@ -403,10 +466,20 @@ function formatRelativeTime(date: Date): string {
 }
 
 function resumeButtons(sessions: SessionListItem[]): InlineButton[][] {
-  return sessions.map((session, index) => [{
-    text: `${session.id.slice(0, 8)} - ${session.name || truncate(session.firstMessage, 20) || "(no messages)"}`,
+  return [sessions.map((_, index) => ({
+    text: String(index + 1),
     callbackData: `${RESUME_PREFIX}:${index}`,
-  }]);
+  }))];
+}
+
+function workspaceButtons(workspaces: WorkspaceListItem[]): InlineButton[][] {
+  return chunkButtons(
+    workspaces.map((_, index) => ({
+      text: String(index + 1),
+      callbackData: `${WORKSPACE_PREFIX}:${index}`,
+    })),
+    5,
+  );
 }
 
 function formatModelMenu(group: ProviderModels): string {
