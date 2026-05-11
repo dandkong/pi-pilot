@@ -171,15 +171,9 @@ export class ChatCommands {
     }
 
     await state.runner.compact();
-    const status = await state.runner.getStatus();
-    const context = status.context
-      ? `${formatNumber(status.context.tokens)} / ${formatNumber(status.context.contextWindow)}`
-      : "unknown";
-    await this.adapter.sendMessage(
-      chatId,
-      `Context compacted.\nContext: ${context}`,
-      { replyToMessageId },
-    );
+    await this.adapter.sendMessage(chatId, "Context compacted.", {
+      replyToMessageId,
+    });
   }
 
   private async sendResumeMenu(
@@ -371,6 +365,7 @@ function formatStatus(status: RunnerStatus, busy: boolean, queuedMessages: numbe
     `Queue: ${queuedMessages}`,
     `Messages: ${status.stats.totalMessages} (${status.stats.userMessages} user / ${status.stats.assistantMessages} assistant)`,
     `Tools: ${status.activeTools.length} active`,
+    `Skills: ${status.skillCount}`,
     `Cost: ${cost}`,
   ].join("\n");
 }

@@ -62,6 +62,7 @@ export type RunnerStatus = {
     cost: number;
   };
   activeTools: string[];
+  skillCount: number;
 };
 
 export type RuntimeStatus = {
@@ -116,7 +117,6 @@ class Workspace {
     log.info("prompt start", {
       sessionId: session.sessionId,
       model: session.model ? `${session.model.provider}/${session.model.name}` : undefined,
-      inputLength: prompt.length,
       text: prompt,
     });
 
@@ -140,7 +140,6 @@ class Workspace {
       log.info("prompt end", {
         sessionId: session.sessionId,
         durationMs: Date.now() - startedAt,
-        outputLength: finalAnswer.length,
         text: finalAnswer,
       });
       return finalAnswer;
@@ -169,6 +168,7 @@ class Workspace {
         cost: stats.cost,
       },
       activeTools: session.getActiveToolNames(),
+      skillCount: session.resourceLoader.getSkills().skills.length,
     };
   }
 
