@@ -13,6 +13,4 @@ RUN mkdir -p /workspace && chown -R bun:bun /app /workspace
 
 USER bun
 
-VOLUME ["/workspace", "/home/bun/.pi/agent"]
-
 CMD ["bun", "run", "start"]
