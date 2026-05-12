@@ -9,10 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     nodejs \
     npm \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && cp /root/.local/bin/uv /usr/local/bin/uv \
-    && cp /root/.local/bin/uvx /usr/local/bin/uvx
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
