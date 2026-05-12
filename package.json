@@ -1,8 +1,12 @@
 {
   "name": "pi-pilot",
+  "version": "0.1.0",
+  "description": "Telegram bot that wraps the pi coding agent for remote programming",
+  "bin": {
+    "pi-pilot": "./index.ts"
+  },
   "module": "index.ts",
   "type": "module",
-  "private": true,
   "scripts": {
     "start": "bun run index.ts",
     "typecheck": "tsc --noEmit"
