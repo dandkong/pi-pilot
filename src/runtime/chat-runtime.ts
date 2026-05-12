@@ -1,5 +1,6 @@
 import type { AppConfig } from "../config.ts";
 import type {
+  ChatAttachment,
   ChatAdapter,
   ChatCallback,
   ChatMessage,
@@ -47,7 +48,7 @@ export class ChatRuntime {
 
     if (await this.commands.handleMessage(message)) return;
 
-    const prompt = message.text.trim();
+    const prompt = formatPrompt(message.text.trim(), message.attachments);
     if (!prompt) return;
 
     const state = await this.getChatState(message.chatId);
@@ -142,7 +143,8 @@ export class ChatRuntime {
       await this.adapter.sendTyping(message.chatId);
       const response = createTurnStreamSender(this.adapter, message);
       const startedAt = Date.now();
-      const answer = await state.runner.run(message.text.trim(), {
+      const prompt = formatPrompt(message.text.trim(), message.attachments);
+      const answer = await state.runner.run(prompt, {
         onTextDelta: (delta) => response.pushText(delta),
         onToolStart: (event) => response.pushToolStart(event),
       });
@@ -234,6 +236,13 @@ function createTurnStreamSender(adapter: ChatAdapter, message: ChatMessage) {
       await adapter.sendMessage(message.chatId, finalText, { render: "markdown" });
     },
   };
+}
+
+function formatPrompt(text: string, attachments?: ChatAttachment[]): string {
+  if (!attachments?.length) return text;
+  const fileList = attachments.map((a) => a.file).join(", ");
+  const prefix = `<attached>${fileList}</attached>`;
+  return text ? `${prefix}\n${text}` : prefix;
 }
 
 function formatToolStart(event: ToolEvent): string {

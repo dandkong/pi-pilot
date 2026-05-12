@@ -19,6 +19,12 @@ export type SentMessage = {
   messageId: string;
 };
 
+export type ChatAttachment = {
+  file: string;
+  mimeType?: string;
+  fileSize?: number;
+};
+
 export type ChatMessage = {
   platform: ChatPlatform;
   chatId: string;
@@ -26,6 +32,7 @@ export type ChatMessage = {
   userId: string;
   username?: string;
   text: string;
+  attachments?: ChatAttachment[];
 };
 
 export type ChatCallback = {

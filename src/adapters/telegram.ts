@@ -1,8 +1,11 @@
 import { Bot, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import type { Context } from "grammy";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { logger } from "../logger.ts";
 import { renderTelegramHtml } from "../render/telegram-html.ts";
 import type {
+  ChatAttachment,
   ChatAdapter,
   ChatCallback,
   ChatMessage,
@@ -23,12 +26,20 @@ export class TelegramAdapter implements ChatAdapter {
   private readonly callbackHandlers: Array<(callback: ChatCallback) => Promise<void>> = [];
   private started = false;
 
+  private readonly tmpDir: string;
+
   constructor(
     token: string,
     private readonly commands: TelegramCommand[] = [],
   ) {
     this.bot = new Bot(token);
+    this.tmpDir = join(process.cwd(), ".tmp");
+    mkdirSync(this.tmpDir, { recursive: true });
     this.bot.on("message:text", async (ctx) => this.handleTextMessage(ctx));
+    this.bot.on("message:photo", async (ctx) => this.handleFileMessage(ctx));
+    this.bot.on("message:document", async (ctx) => this.handleFileMessage(ctx));
+    this.bot.on("message:video", async (ctx) => this.handleFileMessage(ctx));
+    this.bot.on("message:voice", async (ctx) => this.handleFileMessage(ctx));
     this.bot.on("callback_query:data", async (ctx) => this.handleCallback(ctx));
     this.bot.catch((error) => {
       log.error("bot error", formatGrammyError(error.error));
@@ -50,7 +61,7 @@ export class TelegramAdapter implements ChatAdapter {
       await this.bot.api.setMyCommands(this.commands);
     }
     await this.bot.start({ allowed_updates: ["message", "callback_query"] });
-    log.info("bot started");
+    log.info(`bot started, tmpDir=${this.tmpDir}`);
   }
 
   async stop(): Promise<void> {
@@ -156,6 +167,72 @@ export class TelegramAdapter implements ChatAdapter {
     };
 
     this.dispatchMessage(chatMessage);
+  }
+
+  private async handleFileMessage(ctx: Context): Promise<void> {
+    const message = ctx.message;
+    if (!message || message.from?.is_bot) return;
+
+    const text = message.caption?.trim() ?? "";
+    const attachments: ChatAttachment[] = [];
+
+    // Handle photo
+    if (message.photo) {
+      const photo = message.photo.at(-1); // highest resolution
+      if (photo) {
+        const attachment = await this.downloadFile(photo.file_id, `photo_${Date.now()}.jpg`, "image/jpeg", photo.file_size);
+        if (attachment) attachments.push(attachment);
+      }
+    }
+
+    // Handle document
+    if (message.document) {
+      const doc = message.document;
+      const rawName = doc.file_name ?? `file_${Date.now()}`;
+      const attachment = await this.downloadFile(doc.file_id, `${Date.now()}_${rawName}`, doc.mime_type, doc.file_size);
+      if (attachment) attachments.push(attachment);
+    }
+
+    // Handle video
+    if (message.video) {
+      const video = message.video;
+      const rawName = video.file_name ?? `video_${Date.now()}.mp4`;
+      const attachment = await this.downloadFile(video.file_id, `${Date.now()}_${rawName}`, video.mime_type, video.file_size);
+      if (attachment) attachments.push(attachment);
+    }
+
+    // Handle voice
+    if (message.voice) {
+      const voice = message.voice;
+      const attachment = await this.downloadFile(voice.file_id, `voice_${Date.now()}.ogg`, voice.mime_type, voice.file_size);
+      if (attachment) attachments.push(attachment);
+    }
+
+    if (!attachments.length) return;
+
+    const chatMessage: ChatMessage = {
+      platform: "telegram",
+      chatId: String(message.chat.id),
+      messageId: String(message.message_id),
+      userId: String(message.from?.id ?? message.chat.id),
+      username: message.from?.username ?? message.from?.first_name,
+      text: text || "(user sent file(s))",
+      attachments,
+    };
+
+    this.dispatchMessage(chatMessage);
+  }
+
+  private async downloadFile(fileId: string, fileName: string, mimeType?: string, fileSize?: number): Promise<ChatAttachment | undefined> {
+    const file = await this.bot.api.getFile(fileId);
+    if (!file.file_path) return undefined;
+
+    const url = `https://api.telegram.org/file/bot${this.bot.token}/${file.file_path}`;
+    const data = await fetch(url).then((r) => r.arrayBuffer());
+    const localPath = join(this.tmpDir, fileName);
+    writeFileSync(localPath, Buffer.from(data));
+
+    return { file: `.tmp/${fileName}`, mimeType, fileSize };
   }
 
   private async handleCallback(ctx: Context): Promise<void> {
