@@ -5,7 +5,7 @@ import type {
   InlineButton,
   TelegramCommand,
 } from "../adapters/types.ts";
-import type { ProviderModels, RunnerStatus } from "../pi/runner.ts";
+import type { ModelInfo, ProviderModels, RunnerStatus } from "../pi/runner.ts";
 import type { SessionListItem, WorkspaceListItem } from "../pi/runner.ts";
 import type { ChatStateGetter } from "./chat-runtime.ts";
 
@@ -182,23 +182,7 @@ export class ChatCommands {
       return;
     }
 
-    const [message] = await this.adapter.sendMessage(chatId, "Compacting context...", {
-      replyToMessageId,
-    });
-
-    try {
-      await state.runner.compact();
-      if (message) {
-        await this.adapter.editMessage(chatId, message.messageId, "Context compacted.");
-      } else {
-        await this.adapter.sendMessage(chatId, "Context compacted.", { replyToMessageId });
-      }
-    } catch (error) {
-      if (message) {
-        await this.adapter.editMessage(chatId, message.messageId, "Context compaction failed.");
-      }
-      throw error;
-    }
+    await state.runner.compact();
   }
 
   private async sendResumeMenu(
@@ -307,7 +291,8 @@ export class ChatCommands {
   ): Promise<void> {
     const state = await this.getChatState(chatId);
     const groups = await state.runner.getProviderModels();
-    await this.adapter.sendMessage(chatId, formatProviderMenu(groups), {
+    const status = await state.runner.getStatus();
+    await this.adapter.sendMessage(chatId, formatProviderMenu(groups, status.model), {
       replyToMessageId,
       buttons: providerButtons(groups),
     });
@@ -316,9 +301,10 @@ export class ChatCommands {
   private async editModelProviders(callback: ChatCallback): Promise<void> {
     const state = await this.getChatState(callback.chatId);
     const groups = await state.runner.getProviderModels();
+    const status = await state.runner.getStatus();
     await this.editCallbackMessage(
       callback,
-      formatProviderMenu(groups),
+      formatProviderMenu(groups, status.model),
       providerButtons(groups),
     );
   }
@@ -424,9 +410,10 @@ function formatStatus(status: RunnerStatus, busy: boolean, queuedMessages: numbe
   ].join("\n");
 }
 
-function formatProviderMenu(groups: ProviderModels[]): string {
+function formatProviderMenu(groups: ProviderModels[], currentModel?: ModelInfo): string {
   if (!groups.length) return "No available models. Check your pi auth/config.";
-  return "Choose a provider:";
+  const current = currentModel ? `Current: ${currentModel.provider}/${currentModel.name}\n\n` : "";
+  return `${current}Choose a provider:`;
 }
 
 function formatWorkspaceMenu(workspaces: WorkspaceListItem[]): string {
@@ -483,13 +470,13 @@ function workspaceButtons(workspaces: WorkspaceListItem[]): InlineButton[][] {
 }
 
 function formatModelMenu(group: ProviderModels): string {
-  return `Choose a model from ${group.displayName}:`;
+  return `Choose a model from ${group.provider}:`;
 }
 
 function providerButtons(groups: ProviderModels[]): InlineButton[][] {
   return chunkButtons(
     groups.map((group) => ({
-      text: `${group.displayName} (${group.models.length})`,
+      text: `${group.provider} (${group.models.length})`,
       callbackData: `models:provider:${encodeURIComponent(group.provider)}`,
     })),
     2,
@@ -529,7 +516,7 @@ function formatModelLine(
   modelName: string,
   thinkingLevel: string,
 ): string {
-  return `(${provider}) ${modelName} • ${thinkingLevel}`;
+  return `${provider}/${modelName} • ${thinkingLevel}`;
 }
 
 function formatNumber(value: number | null): string {

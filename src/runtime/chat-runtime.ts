@@ -6,7 +6,7 @@ import type {
   ChatMessage,
 } from "../adapters/types.ts";
 import { logger } from "../logger.ts";
-import { PiRunner, type ToolEvent } from "../pi/runner.ts";
+import { PiRunner, type CompactionEvent, type ToolEvent } from "../pi/runner.ts";
 import { ChatCommands } from "./chat-commands.ts";
 
 const log = logger.child("runtime");
@@ -101,7 +101,35 @@ export class ChatRuntime {
     const state = { runner, busy: false, queue: [] };
     this.chats.set(chatId, state);
     await runner.init();
+
+    // Subscribe to compaction events
+    runner.setCompactionCallback((event) => {
+      this.handleCompactionEvent(chatId, event).catch((error) => {
+        log.error(`[chat ${chatId}] compaction notification failed`, error);
+      });
+    });
+
     return state;
+  }
+
+  private async handleCompactionEvent(chatId: string, event: CompactionEvent): Promise<void> {
+    if (event.type === "compaction_start") {
+      const reason = event.reason === "manual" ? "manual" : event.reason === "threshold" ? "threshold reached" : "context overflow";
+      await this.adapter.sendMessage(chatId, `🔄 Compacting context (${reason})...`);
+      return;
+    }
+
+    if (event.type === "compaction_end") {
+      if (event.aborted) {
+        await this.adapter.sendMessage(chatId, "⚠️ Compaction aborted.");
+        return;
+      }
+      if (event.errorMessage) {
+        await this.adapter.sendMessage(chatId, `❌ Compaction failed: ${event.errorMessage}`);
+        return;
+      }
+      await this.adapter.sendMessage(chatId, "✅ Context compacted.");
+    }
   }
 
   private async processQueue(chatId: string, state: ChatState): Promise<void> {

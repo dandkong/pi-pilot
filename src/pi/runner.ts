@@ -6,12 +6,13 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import type { CompactionResult } from "@earendil-works/pi-coding-agent";
 import type { AppConfig } from "../config.ts";
 import { logger } from "../logger.ts";
 
 const log = logger.child("pi");
 
-type ModelInfo = ReturnType<ModelRegistry["getAvailable"]>[number];
+export type ModelInfo = ReturnType<ModelRegistry["getAvailable"]>[number];
 
 export type ProviderModels = {
   provider: string;
@@ -27,10 +28,20 @@ export type ToolEvent = {
   isError?: unknown;
 };
 
+export type CompactionEvent = {
+  type: "compaction_start" | "compaction_end";
+  reason: "manual" | "threshold" | "overflow";
+  result?: CompactionResult;
+  aborted?: boolean;
+  errorMessage?: string;
+};
+
 export type RunOptions = {
   onTextDelta?: (delta: string) => void;
   onToolStart?: (event: ToolEvent) => void | Promise<void>;
 };
+
+export type CompactionCallback = (event: CompactionEvent) => void;
 
 export type SessionListItem = {
   id: string;
@@ -85,12 +96,18 @@ class Workspace {
   private session: AgentSession | undefined;
   private settingsManager: SettingsManager | undefined;
   private initPromise: Promise<void> | undefined;
+  private compactionCallback: CompactionCallback | undefined;
+  private unsubscribeSession: (() => void) | undefined;
 
   constructor(
     readonly cwd: string,
     private readonly authStorage: AuthStorage,
     private readonly modelRegistry: ModelRegistry,
   ) {}
+
+  setCompactionCallback(callback: CompactionCallback): void {
+    this.compactionCallback = callback;
+  }
 
   async init(): Promise<void> {
     if (this.session) return;
@@ -239,6 +256,8 @@ class Workspace {
   }
 
   dispose(): void {
+    this.unsubscribeSession?.();
+    this.unsubscribeSession = undefined;
     this.session?.dispose();
     this.session = undefined;
     this.settingsManager = undefined;
@@ -265,6 +284,25 @@ class Workspace {
 
     this.settingsManager = settingsManager;
     this.session = session;
+
+    // Subscribe to compaction events
+    this.unsubscribeSession?.();
+    this.unsubscribeSession = session.subscribe((event) => {
+      if (event.type === "compaction_start") {
+        log.info("compaction_start", event);
+        this.compactionCallback?.({ type: "compaction_start", reason: event.reason });
+      }
+      if (event.type === "compaction_end") {
+        log.info("compaction_end", event);
+        this.compactionCallback?.({
+          type: "compaction_end",
+          reason: event.reason,
+          result: event.result ?? undefined,
+          aborted: event.aborted,
+          errorMessage: event.errorMessage,
+        });
+      }
+    });
 
     const skills = session.resourceLoader.getSkills().skills;
     log.info("session initialized", {
@@ -302,6 +340,10 @@ export class PiRunner {
 
   async init(): Promise<void> {
     await this.getWorkspace().init();
+  }
+
+  setCompactionCallback(callback: CompactionCallback): void {
+    this.getWorkspace().setCompactionCallback(callback);
   }
 
   async run(prompt: string, options?: RunOptions): Promise<string> {
