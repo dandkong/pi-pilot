@@ -11,6 +11,7 @@ A Telegram bot for running [pi](https://github.com/earendil-works/pi-mono) from 
 - Workspace and session switching
 - Message queue per chat
 - Status, stop, and compact commands
+- File attachments (photos, documents, videos, voice)
 - Docker image published to Docker Hub
 
 ## Commands
