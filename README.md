@@ -60,23 +60,16 @@ bun run start
 
 `PI_PILOT_CWD` is the project directory pi will work in. If unset, it defaults to the current process directory. CLI options take precedence over environment variables.
 
-## Global CLI
+## CLI Options
 
-Install the package globally, then launch it from any project directory:
-
-```bash
-bun add -g pi-pilot
-pi-pilot --telegram-token 123456:your-token --cwd "$PWD" --allowed-users 123456789
-```
-
-For local development, link this repository as a global command:
+For local development, link this repository as a command:
 
 ```bash
 bun link
 pi-pilot --help
 ```
 
-Available CLI options:
+Available options when running from this repository:
 
 | Option | Environment Variable | Description |
 |--------|----------------------|-------------|
