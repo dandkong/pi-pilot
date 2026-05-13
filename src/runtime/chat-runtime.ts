@@ -273,6 +273,9 @@ function formatPrompt(text: string, attachments?: ChatAttachment[]): string {
   return text ? `${prefix}\n${text}` : prefix;
 }
 
+const TOOL_SUMMARY_LIMIT = 180;
+const TOOL_VALUE_LIMIT = 80;
+
 function formatToolStart(event: ToolEvent): string {
   const name = String(event.toolName ?? "tool");
   const icon = toolIcon(name);
@@ -303,7 +306,33 @@ function summarizeToolArgs(toolName: string, args: unknown): string | undefined 
     return truncate(`${path}${suffix}`);
   }
 
-  return undefined;
+  return summarizeGenericArgs(record);
+}
+
+function summarizeGenericArgs(record: Record<string, unknown>): string | undefined {
+  const entries = Object.entries(record);
+  if (entries.length === 0) return undefined;
+
+  const parts = entries.slice(0, 6).map(([key, value]) => `${key}=${formatGenericValue(value)}`);
+  if (entries.length > 6) parts.push(`+${entries.length - 6} more`);
+
+  return truncate(parts.join(", "), TOOL_SUMMARY_LIMIT);
+}
+
+function formatGenericValue(value: unknown): string {
+  if (typeof value === "string") return JSON.stringify(truncate(value, TOOL_VALUE_LIMIT) ?? "");
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    const preview = value.slice(0, 3).map((item) => formatGenericValue(item)).join(", ");
+    return `[${preview}${value.length > 3 ? ", ..." : ""}]`;
+  }
+  if (typeof value === "object" && value) {
+    const keys = Object.keys(value as Record<string, unknown>);
+    return keys.length ? `{${keys.slice(0, 3).join(", ")}${keys.length > 3 ? ", ..." : ""}}` : "{}";
+  }
+  return String(value);
 }
 
 function pickString(record: Record<string, unknown>, key: string): string | undefined {
@@ -311,7 +340,7 @@ function pickString(record: Record<string, unknown>, key: string): string | unde
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function truncate(value: string | undefined, limit = 100): string | undefined {
+function truncate(value: string | undefined, limit = TOOL_SUMMARY_LIMIT): string | undefined {
   if (!value) return undefined;
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
