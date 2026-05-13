@@ -269,6 +269,7 @@ export class ChatCommands {
     const workspace = await state.runner.switchWorkspace(index);
     await this.editCallbackMessage(callback, `Workspace selected:\nCWD: ${workspace.cwd}`, []);
     await this.adapter.answerCallback(callback, "Workspace selected");
+    await this.sendStatus(callback.chatId);
   }
 
   private async sendStatus(

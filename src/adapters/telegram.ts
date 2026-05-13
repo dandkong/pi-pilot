@@ -232,7 +232,7 @@ export class TelegramAdapter implements ChatAdapter {
     const localPath = join(this.tmpDir, fileName);
     writeFileSync(localPath, Buffer.from(data));
 
-    return { file: `.tmp/${fileName}`, mimeType, fileSize };
+    return { file: localPath, mimeType, fileSize };
   }
 
   private async handleCallback(ctx: Context): Promise<void> {
