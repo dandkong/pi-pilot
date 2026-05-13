@@ -1,6 +1,7 @@
 import { Bot, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import type { Context } from "grammy";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { logger } from "../logger.ts";
 import { renderTelegramHtml } from "../render/telegram-html.ts";
@@ -33,7 +34,7 @@ export class TelegramAdapter implements ChatAdapter {
     private readonly commands: TelegramCommand[] = [],
   ) {
     this.bot = new Bot(token);
-    this.tmpDir = join(process.cwd(), ".tmp");
+    this.tmpDir = join(tmpdir(), "pi-pilot");
     mkdirSync(this.tmpDir, { recursive: true });
     this.bot.on("message:text", async (ctx) => this.handleTextMessage(ctx));
     this.bot.on("message:photo", async (ctx) => this.handleFileMessage(ctx));
