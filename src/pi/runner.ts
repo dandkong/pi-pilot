@@ -7,7 +7,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { CompactionResult } from "@earendil-works/pi-coding-agent";
-import type { AppConfig } from "../config.ts";
+import type { RuntimeConfig } from "../config/runtime.ts";
 import { logger } from "../logger.ts";
 
 const log = logger.child("pi");
@@ -334,7 +334,7 @@ export class PiRunner {
   private workspace: Workspace | undefined;
   private currentCwd: string;
 
-  constructor(private readonly config: AppConfig) {
+  constructor(private readonly config: RuntimeConfig) {
     this.currentCwd = config.cwd;
   }
 

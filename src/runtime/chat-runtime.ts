@@ -1,4 +1,4 @@
-import type { AppConfig } from "../config.ts";
+import type { RuntimeConfig } from "../config/runtime.ts";
 import type {
   ChatAttachment,
   ChatAdapter,
@@ -24,7 +24,7 @@ export class ChatRuntime {
   private readonly commands: ChatCommands;
 
   constructor(
-    private readonly config: AppConfig,
+    private readonly config: RuntimeConfig,
     private readonly adapter: ChatAdapter,
   ) {
     this.commands = new ChatCommands(adapter, (chatId) =>

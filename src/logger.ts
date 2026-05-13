@@ -1,4 +1,6 @@
-export type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
+import type { LogLevel } from "./config/schema.ts";
+
+export type { LogLevel };
 
 const LEVEL_RANK: Record<LogLevel, number> = {
   debug: 10,
@@ -11,12 +13,16 @@ const LEVEL_RANK: Record<LogLevel, number> = {
 export class Logger {
   constructor(
     private readonly scope: string,
-    private readonly level: LogLevel = readLogLevel(),
+    private level: LogLevel = "info",
     private readonly previewLimit = 2_000,
   ) {}
 
   child(scope: string): Logger {
     return new Logger(`${this.scope}:${scope}`, this.level, this.previewLimit);
+  }
+
+  setLevel(level: LogLevel): void {
+    this.level = level;
   }
 
   debug(message: string, details?: unknown): void {
@@ -60,12 +66,8 @@ export class Logger {
 
 export const logger = new Logger("pi-pilot");
 
-function readLogLevel(): LogLevel {
-  const value = process.env.PI_PILOT_LOG_LEVEL?.toLowerCase();
-  if (value === "debug" || value === "info" || value === "warn" || value === "error" || value === "silent") {
-    return value;
-  }
-  return "info";
+export function configureLogger(level: LogLevel): void {
+  logger.setLevel(level);
 }
 
 function stringify(value: unknown): string {

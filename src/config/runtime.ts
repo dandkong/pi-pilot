@@ -1,26 +1,33 @@
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { type ConfigOverrides, type LogLevel, resolveConfigValues } from "./schema.ts";
 
-export type AppConfig = {
+export type RuntimeConfig = {
   telegramToken: string;
   cwd: string;
   workspaces: string[];
   allowedTelegramUsers: string[];
+  logLevel: LogLevel;
 };
 
-export function loadConfig(): AppConfig {
-  const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-  if (!telegramToken) throw new Error("Missing TELEGRAM_BOT_TOKEN. Set it in .env or your shell environment.");
-
-  const cwd = resolve(process.env.PI_PILOT_CWD?.trim() || process.cwd());
+export function loadConfig(overrides: ConfigOverrides = {}): RuntimeConfig {
+  const values = resolveConfigValues(overrides);
+  const telegramToken = requiredValue(values.telegramToken, "TELEGRAM_BOT_TOKEN");
+  const cwd = resolve(requiredValue(values.cwd, "PI_PILOT_CWD"));
   assertDirectory(cwd, "PI_PILOT_CWD");
 
   return {
     telegramToken,
     cwd,
-    workspaces: parseWorkspaces(process.env.PI_PILOT_WORKSPACES, cwd),
-    allowedTelegramUsers: parseList(process.env.TELEGRAM_ALLOWED_USERS),
+    workspaces: parseWorkspaces(values.workspaces, cwd),
+    allowedTelegramUsers: parseList(values.allowedTelegramUsers),
+    logLevel: requiredValue(values.logLevel, "PI_PILOT_LOG_LEVEL") as LogLevel,
   };
+}
+
+function requiredValue(value: string | undefined, name: string): string {
+  if (!value) throw new Error(`Missing ${name}.`);
+  return value;
 }
 
 function assertDirectory(path: string, envName: string): void {

@@ -30,7 +30,18 @@ You can also send a coding request directly. If a task is already running, new m
 
 ## Local Run
 
-Create `.env`:
+Run with CLI options:
+
+```bash
+pi-pilot \
+  --telegram-token 123456:your-token \
+  --allowed-users 123456789 \
+  --cwd /path/to/project \
+  --workspaces /path/to/project,/path/to/other-project \
+  --log-level info
+```
+
+Or create `.env`:
 
 ```env
 TELEGRAM_BOT_TOKEN=123456:your-token
@@ -40,14 +51,40 @@ PI_PILOT_WORKSPACES=/path/to/project,/path/to/other-project
 PI_PILOT_LOG_LEVEL=info
 ```
 
-Install and start:
+Install and start from this repository:
 
 ```bash
 bun install
 bun run start
 ```
 
-`PI_PILOT_CWD` is the project directory pi will work in. If unset, it defaults to the current process directory.
+`PI_PILOT_CWD` is the project directory pi will work in. If unset, it defaults to the current process directory. CLI options take precedence over environment variables.
+
+## Global CLI
+
+Install the package globally, then launch it from any project directory:
+
+```bash
+bun add -g pi-pilot
+pi-pilot --telegram-token 123456:your-token --cwd "$PWD" --allowed-users 123456789
+```
+
+For local development, link this repository as a global command:
+
+```bash
+bun link
+pi-pilot --help
+```
+
+Available CLI options:
+
+| Option | Environment Variable | Description |
+|--------|----------------------|-------------|
+| `--telegram-token`, `--bot-token` | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `--cwd` | `PI_PILOT_CWD` | Default project directory |
+| `--workspaces` | `PI_PILOT_WORKSPACES` | Comma-separated workspace paths |
+| `--allowed-users` | `TELEGRAM_ALLOWED_USERS` | Comma-separated Telegram user IDs |
+| `--log-level` | `PI_PILOT_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, or `silent` |
 
 ## Docker
 
