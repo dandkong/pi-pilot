@@ -128,14 +128,6 @@ cp .env.example .env
 docker compose up --build
 ```
 
-## Storage
-
-- `/workspace` - the project directory pi can read and edit.
-- `/home/bun/.pi/agent` - pi auth, config, and persisted sessions.
-- Runtime queues are in memory and are cleared when the bot restarts.
-
-Mount both paths explicitly in Docker. Only mounted directories are available to the container.
-
 ## Workspaces
 
 `PI_PILOT_CWD` is the default workspace. Add `PI_PILOT_WORKSPACES` to switch between mounted directories with `/workspaces`:
