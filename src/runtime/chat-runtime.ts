@@ -201,6 +201,7 @@ function createTurnStreamSender(adapter: ChatAdapter, message: ChatMessage) {
   let streamStarted = false;
   let pending = Promise.resolve();
   let scheduled: Timer | undefined;
+  const minUpdateIntervalMs = 800;
   let lastUpdatedAt = 0;
 
   const startStream = async () => {
@@ -231,7 +232,7 @@ function createTurnStreamSender(adapter: ChatAdapter, message: ChatMessage) {
     scheduled = setTimeout(() => {
       scheduled = undefined;
       const now = Date.now();
-      if (now - lastUpdatedAt < 700) {
+      if (now - lastUpdatedAt < minUpdateIntervalMs) {
         scheduleUpdate();
         return;
       }
@@ -273,8 +274,9 @@ function formatPrompt(text: string, attachments?: ChatAttachment[]): string {
   return text ? `${prefix}\n${text}` : prefix;
 }
 
-const TOOL_SUMMARY_LIMIT = 180;
-const TOOL_VALUE_LIMIT = 80;
+const TOOL_ARG_LIMIT = 2;
+const TOOL_SUMMARY_LIMIT = 140;
+const TOOL_VALUE_LIMIT = 60;
 
 function formatToolStart(event: ToolEvent): string {
   const name = String(event.toolName ?? "tool");
@@ -287,8 +289,8 @@ function toolIcon(toolName: string): string {
   if (toolName === "read") return "📖";
   if (toolName === "bash") return "💻";
   if (toolName === "edit") return "📝";
-  if (toolName === "write") return "✏️";
-  return "🔧";
+  if (toolName === "write") return "📄";
+  return "🛠️";
 }
 
 function summarizeToolArgs(toolName: string, args: unknown): string | undefined {
@@ -313,8 +315,8 @@ function summarizeGenericArgs(record: Record<string, unknown>): string | undefin
   const entries = Object.entries(record);
   if (entries.length === 0) return undefined;
 
-  const parts = entries.slice(0, 6).map(([key, value]) => `${key}=${formatGenericValue(value)}`);
-  if (entries.length > 6) parts.push(`+${entries.length - 6} more`);
+  const parts = entries.slice(0, TOOL_ARG_LIMIT).map(([key, value]) => `${key}=${formatGenericValue(value)}`);
+  if (entries.length > TOOL_ARG_LIMIT) parts.push(`+${entries.length - TOOL_ARG_LIMIT} more`);
 
   return truncate(parts.join(", "), TOOL_SUMMARY_LIMIT);
 }
