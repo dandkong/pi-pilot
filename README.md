@@ -1,18 +1,21 @@
 # pi-pilot
 
-> Pi in your pocket. Code from anywhere.
+> Pi in your pocket. Create from anywhere.
 
-A Telegram bot for running [pi](https://github.com/earendil-works/pi-mono) from chat: send coding requests, stream replies, switch models, and resume sessions.
+pi-pilot is a Telegram interface for [pi](https://pi.dev/), bringing coding, research, automation, and anything else you can imagine to Telegram.
 
 ## Features
 
-- Streaming Telegram replies
-- Inline model picker
-- Workspace and session switching
-- Message queue per chat
-- Status, stop, and compact commands
-- File attachments (photos, documents, videos, voice)
-- Docker image published to Docker Hub
+- Stream replies and tool activity back to chat
+- Switch workspaces, models, and recent sessions
+- Use pi extensions, skills, prompts, and persisted sessions
+- Docker deployment support
+
+## Prerequisites
+
+Install and configure [pi](https://pi.dev/) first. pi-pilot reuses its model settings, credentials, sessions, extensions, skills, and prompts.
+
+For Docker, mount the agent data directory to `/home/bun/.pi/agent`.
 
 ## Commands
 
@@ -26,22 +29,9 @@ A Telegram bot for running [pi](https://github.com/earendil-works/pi-mono) from 
 | `/stop` | Abort the running task and clear queued messages |
 | `/compact` | Compact conversation context |
 
-You can also send a coding request directly. If a task is already running, new messages are queued.
+## Run from Source
 
-## Local Run
-
-Run with CLI options:
-
-```bash
-pi-pilot \
-  --telegram-token 123456:your-token \
-  --allowed-users 123456789 \
-  --cwd /path/to/project \
-  --workspaces /path/to/project,/path/to/other-project \
-  --log-level info
-```
-
-Or create `.env`:
+Create `.env`:
 
 ```env
 TELEGRAM_BOT_TOKEN=123456:your-token
@@ -58,9 +48,7 @@ bun install
 bun run start
 ```
 
-`PI_PILOT_CWD` is the project directory pi will work in. If unset, it defaults to the current process directory. CLI options take precedence over environment variables.
-
-## CLI Options
+## CLI
 
 For local development, link this repository as a command:
 
@@ -69,7 +57,18 @@ bun link
 pi-pilot --help
 ```
 
-Available options when running from this repository:
+Run with CLI options:
+
+```bash
+pi-pilot \
+  --telegram-token 123456:your-token \
+  --allowed-users 123456789 \
+  --cwd /path/to/project \
+  --workspaces /path/to/project,/path/to/other-project \
+  --log-level info
+```
+
+Available options:
 
 | Option | Environment Variable | Description |
 |--------|----------------------|-------------|
@@ -81,7 +80,7 @@ Available options when running from this repository:
 
 ## Docker
 
-Use the published image:
+### Use the published image
 
 ```yaml
 services:
@@ -114,6 +113,21 @@ TELEGRAM_BOT_TOKEN=123456:your-token
 TELEGRAM_ALLOWED_USERS=123456789
 ```
 
+### Build locally
+
+Build an image from this repository:
+
+```bash
+docker build -t pi-pilot .
+```
+
+Or use the included local compose file:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
 ## Storage
 
 - `/workspace` - the project directory pi can read and edit.
@@ -131,8 +145,6 @@ PI_PILOT_CWD=/workspace/project-a
 PI_PILOT_WORKSPACES=/workspace/project-a,/workspace/project-b
 ```
 
-If `PI_PILOT_WORKSPACES` is empty, only `PI_PILOT_CWD` is available. If it does not include `PI_PILOT_CWD`, the default is added first automatically.
-
 ## Access Control
 
 Set `TELEGRAM_ALLOWED_USERS` to a comma-separated list of Telegram user IDs:
@@ -142,19 +154,6 @@ TELEGRAM_ALLOWED_USERS=123456789,987654321
 ```
 
 Leave it empty to allow all users. User IDs are logged when unauthorized users are rejected.
-
-## Build Locally
-
-```bash
-docker build -t pi-pilot .
-```
-
-Or use the included local compose file:
-
-```bash
-cp .env.example .env
-docker compose up --build
-```
 
 ## License
 
