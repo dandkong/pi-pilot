@@ -274,7 +274,7 @@ function formatPrompt(text: string, attachments?: ChatAttachment[]): string {
   return text ? `${prefix}\n${text}` : prefix;
 }
 
-const TOOL_ARG_LIMIT = 2;
+const TOOL_ARG_LIMIT = 3;
 const TOOL_SUMMARY_LIMIT = 140;
 const TOOL_VALUE_LIMIT = 60;
 
