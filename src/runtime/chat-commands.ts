@@ -267,7 +267,7 @@ export class ChatCommands {
     }
 
     const workspace = await state.runner.switchWorkspace(index);
-    await this.editCallbackMessage(callback, `Workspace selected:\nCWD: ${workspace.cwd}`, []);
+    await this.editCallbackMessage(callback, `Workspace selected:\nWorkspace: ${workspace.cwd}`, []);
     await this.adapter.answerCallback(callback, "Workspace selected");
     await this.sendStatus(callback.chatId);
   }
@@ -398,14 +398,14 @@ function formatStatus(status: RunnerStatus, busy: boolean, queuedMessages: numbe
     "Status",
     `Model: ${model}`,
     `Context: ${context}`,
-    `CWD: ${status.cwd}`,
+    `Workspace: ${status.cwd}`,
     `Session: ${session}`,
     `Busy: ${busy || status.isStreaming ? "yes" : "no"}`,
     `Streaming: ${status.isStreaming ? "yes" : "no"}`,
     `Compacting: ${status.isCompacting ? "yes" : "no"}`,
     `Queue: ${queuedMessages}`,
     `Messages: ${status.stats.totalMessages} (${status.stats.userMessages} user / ${status.stats.assistantMessages} assistant)`,
-    `Tools: ${status.activeTools.length} active`,
+    `Tools: ${status.activeTools.length}`,
     `Skills: ${status.skillCount}`,
     `Cost: ${cost}`,
   ].join("\n");

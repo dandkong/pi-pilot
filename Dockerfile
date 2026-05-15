@@ -13,8 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-ENV NODE_ENV=production \
-    PI_PILOT_CWD=/workspace
+ENV NODE_ENV=production
 
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production

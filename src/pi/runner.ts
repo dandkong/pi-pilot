@@ -335,7 +335,7 @@ export class PiRunner {
   private currentCwd: string;
 
   constructor(private readonly config: RuntimeConfig) {
-    this.currentCwd = config.cwd;
+    this.currentCwd = config.workspaces[0] ?? process.cwd();
   }
 
   async init(): Promise<void> {
@@ -428,7 +428,7 @@ export class PiRunner {
     this.workspace = undefined;
     this.modelRegistry = undefined;
     this.authStorage = undefined;
-    this.currentCwd = this.config.cwd;
+    this.currentCwd = this.config.workspaces[0] ?? process.cwd();
   }
 
   private getWorkspace(): Workspace {

@@ -36,7 +36,6 @@ Create `.env`:
 ```env
 TELEGRAM_BOT_TOKEN=123456:your-token
 TELEGRAM_ALLOWED_USERS=123456789
-PI_PILOT_CWD=/path/to/project
 PI_PILOT_WORKSPACES=/path/to/project,/path/to/other-project
 PI_PILOT_LOG_LEVEL=info
 ```
@@ -63,7 +62,6 @@ Run with CLI options:
 pi-pilot \
   --telegram-token 123456:your-token \
   --allowed-users 123456789 \
-  --cwd /path/to/project \
   --workspaces /path/to/project,/path/to/other-project \
   --log-level info
 ```
@@ -73,7 +71,6 @@ Available options:
 | Option | Environment Variable | Description |
 |--------|----------------------|-------------|
 | `--telegram-token`, `--bot-token` | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
-| `--cwd` | `PI_PILOT_CWD` | Default project directory |
 | `--workspaces` | `PI_PILOT_WORKSPACES` | Comma-separated workspace paths |
 | `--allowed-users` | `TELEGRAM_ALLOWED_USERS` | Comma-separated Telegram user IDs |
 | `--log-level` | `PI_PILOT_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, or `silent` |
@@ -91,7 +88,6 @@ services:
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS}
-      PI_PILOT_CWD: /workspace/project-a
       PI_PILOT_WORKSPACES: /workspace/project-a,/workspace/project-b
       PI_PILOT_LOG_LEVEL: info
       TZ: Asia/Shanghai
@@ -130,12 +126,13 @@ docker compose up --build
 
 ## Workspaces
 
-`PI_PILOT_CWD` is the default workspace. Add `PI_PILOT_WORKSPACES` to switch between mounted directories with `/workspaces`:
+If `PI_PILOT_WORKSPACES` is set, the first path is the default workspace and `/workspaces` can switch between the listed directories:
 
 ```env
-PI_PILOT_CWD=/workspace/project-a
 PI_PILOT_WORKSPACES=/workspace/project-a,/workspace/project-b
 ```
+
+If `PI_PILOT_WORKSPACES` is not set, pi-pilot uses the directory where the process starts.
 
 ## Access Control
 

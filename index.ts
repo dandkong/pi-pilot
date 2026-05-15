@@ -56,5 +56,5 @@ const shutdown = async (signal: string) => {
 process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-console.log(`Pi Pilot backend started. cwd=${config.cwd}`);
+console.log(`Pi Pilot backend started. workspace=${config.workspaces[0]}`);
 await adapter.start();

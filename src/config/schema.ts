@@ -1,7 +1,7 @@
 export const LOG_LEVELS = ["debug", "info", "warn", "error", "silent"] as const;
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
-export type ConfigKey = "telegramToken" | "cwd" | "workspaces" | "allowedTelegramUsers" | "logLevel";
+export type ConfigKey = "telegramToken" | "workspaces" | "allowedTelegramUsers" | "logLevel";
 export type ConfigOverrides = Partial<Record<ConfigKey, string>>;
 export type ResolvedConfigValues = Partial<Record<ConfigKey, string>>;
 
@@ -24,14 +24,6 @@ export const CONFIG_DEFINITIONS: readonly ConfigDefinition[] = [
     valueName: "token",
     description: "Telegram bot token",
     required: true,
-  },
-  {
-    key: "cwd",
-    env: "PI_PILOT_CWD",
-    flags: ["--cwd"],
-    valueName: "path",
-    description: "Default project directory",
-    defaultValue: () => process.cwd(),
   },
   {
     key: "workspaces",

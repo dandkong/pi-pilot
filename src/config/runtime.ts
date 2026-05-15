@@ -4,7 +4,6 @@ import { type ConfigOverrides, type LogLevel, resolveConfigValues } from "./sche
 
 export type RuntimeConfig = {
   telegramToken: string;
-  cwd: string;
   workspaces: string[];
   allowedTelegramUsers: string[];
   logLevel: LogLevel;
@@ -13,13 +12,10 @@ export type RuntimeConfig = {
 export function loadConfig(overrides: ConfigOverrides = {}): RuntimeConfig {
   const values = resolveConfigValues(overrides);
   const telegramToken = requiredValue(values.telegramToken, "TELEGRAM_BOT_TOKEN");
-  const cwd = resolve(requiredValue(values.cwd, "PI_PILOT_CWD"));
-  assertDirectory(cwd, "PI_PILOT_CWD");
 
   return {
     telegramToken,
-    cwd,
-    workspaces: parseWorkspaces(values.workspaces, cwd),
+    workspaces: parseWorkspaces(values.workspaces),
     allowedTelegramUsers: parseList(values.allowedTelegramUsers),
     logLevel: requiredValue(values.logLevel, "PI_PILOT_LOG_LEVEL") as LogLevel,
   };
@@ -42,12 +38,12 @@ function parseList(value: string | undefined): string[] {
     .filter(Boolean) ?? [];
 }
 
-function parseWorkspaces(value: string | undefined, defaultCwd: string): string[] {
-  const paths = [defaultCwd, ...parseList(value).map((item) => resolve(item))];
-  const uniquePaths = [...new Set(paths)];
+function parseWorkspaces(value: string | undefined): string[] {
+  const paths = parseList(value).map((item) => resolve(item));
+  const uniquePaths = [...new Set(paths.length ? paths : [process.cwd()])];
 
   for (const path of uniquePaths) {
-    assertDirectory(path, path === defaultCwd ? "PI_PILOT_CWD" : "PI_PILOT_WORKSPACES");
+    assertDirectory(path, "PI_PILOT_WORKSPACES");
   }
 
   return uniquePaths;
