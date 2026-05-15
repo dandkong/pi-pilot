@@ -36,6 +36,8 @@ export type CompactionEvent = {
   errorMessage?: string;
 };
 
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
 export type RunOptions = {
   onTextDelta?: (delta: string) => void;
   onToolStart?: (event: ToolEvent) => void | Promise<void>;
@@ -214,6 +216,17 @@ class Workspace {
     return model;
   }
 
+  async getAvailableThinkingLevels(): Promise<ThinkingLevel[]> {
+    const session = await this.getSession();
+    return session.getAvailableThinkingLevels() as ThinkingLevel[];
+  }
+
+  async setThinkingLevel(level: ThinkingLevel): Promise<ThinkingLevel> {
+    const session = await this.getSession();
+    session.setThinkingLevel(level);
+    return session.thinkingLevel as ThinkingLevel;
+  }
+
   async abort(): Promise<void> {
     const session = await this.getSession();
     session.clearQueue();
@@ -375,6 +388,14 @@ export class PiRunner {
 
   async setModel(provider: string, modelIndex: number): Promise<ModelInfo> {
     return this.getWorkspace().setModel(provider, modelIndex);
+  }
+
+  async getAvailableThinkingLevels(): Promise<ThinkingLevel[]> {
+    return this.getWorkspace().getAvailableThinkingLevels();
+  }
+
+  async setThinkingLevel(level: ThinkingLevel): Promise<ThinkingLevel> {
+    return this.getWorkspace().setThinkingLevel(level);
   }
 
   async getRuntimeStatus(): Promise<RuntimeStatus> {

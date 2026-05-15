@@ -24,6 +24,7 @@ For Docker, mount the agent data directory to `/home/bun/.pi/agent`.
 | `/status` | Show current model, context, session, queue, tools, skills, and cost |
 | `/workspaces` | Switch between configured project directories |
 | `/models` | Choose a model with inline buttons |
+| `/thinking` | Set thinking level for the current model |
 | `/resume` | Resume one of the 5 most recent sessions |
 | `/new` | Start a fresh session |
 | `/stop` | Abort the running task and clear queued messages |

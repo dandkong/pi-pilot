@@ -6,17 +6,19 @@ import type {
   TelegramCommand,
 } from "../adapters/types.ts";
 import type { ModelInfo, ProviderModels, RunnerStatus } from "../pi/runner.ts";
-import type { SessionListItem, WorkspaceListItem } from "../pi/runner.ts";
+import type { SessionListItem, ThinkingLevel, WorkspaceListItem } from "../pi/runner.ts";
 import type { ChatStateGetter } from "./chat-runtime.ts";
 
 const MODELS_HOME = "models:home";
 const RESUME_PREFIX = "resume";
+const THINKING_PREFIX = "thinking";
 const WORKSPACE_PREFIX = "workspace";
 
 export const TELEGRAM_COMMANDS: TelegramCommand[] = [
   { command: "status", description: "Show current session status" },
   { command: "workspaces", description: "Switch workspace" },
   { command: "models", description: "Choose model" },
+  { command: "thinking", description: "Set thinking level" },
   { command: "resume", description: "Resume a previous session" },
   { command: "new", description: "Start a new session" },
   { command: "stop", description: "Abort current task" },
@@ -52,6 +54,11 @@ export class ChatCommands {
 
     if (command === "models") {
       await this.sendModelProviders(message.chatId, message.messageId);
+      return true;
+    }
+
+    if (command === "thinking") {
+      await this.sendThinkingMenu(message.chatId, message.messageId);
       return true;
     }
 
@@ -121,6 +128,11 @@ export class ChatCommands {
 
       if (callback.data.startsWith(`${RESUME_PREFIX}:`)) {
         await this.selectResumeSession(callback);
+        return;
+      }
+
+      if (callback.data.startsWith(`${THINKING_PREFIX}:`)) {
+        await this.selectThinkingLevel(callback);
         return;
       }
 
@@ -213,6 +225,19 @@ export class ChatCommands {
     });
   }
 
+  private async sendThinkingMenu(
+    chatId: string,
+    replyToMessageId?: string,
+  ): Promise<void> {
+    const state = await this.getChatState(chatId);
+    const status = await state.runner.getStatus();
+    const levels = await state.runner.getAvailableThinkingLevels();
+    await this.adapter.sendMessage(chatId, formatThinkingMenu(levels, status.thinkingLevel), {
+      replyToMessageId,
+      buttons: thinkingButtons(levels, status.thinkingLevel),
+    });
+  }
+
   private async sendNewSession(
     chatId: string,
     replyToMessageId?: string,
@@ -270,6 +295,27 @@ export class ChatCommands {
     await this.editCallbackMessage(callback, `Workspace selected:\nWorkspace: ${workspace.cwd}`, []);
     await this.adapter.answerCallback(callback, "Workspace selected");
     await this.sendStatus(callback.chatId);
+  }
+
+  private async selectThinkingLevel(callback: ChatCallback): Promise<void> {
+    const rawLevel = callback.data.slice(`${THINKING_PREFIX}:`.length);
+    if (!isThinkingLevel(rawLevel)) throw new Error("Invalid thinking level");
+
+    const state = await this.getChatState(callback.chatId);
+    const runtimeStatus = await state.runner.getRuntimeStatus();
+    if (state.busy || runtimeStatus.isStreaming || runtimeStatus.isCompacting || state.queue.length > 0) {
+      await this.adapter.answerCallback(callback, "Cannot change thinking while a task is running");
+      return;
+    }
+
+    const level = await state.runner.setThinkingLevel(rawLevel);
+    const levels = await state.runner.getAvailableThinkingLevels();
+    await this.editCallbackMessage(
+      callback,
+      formatThinkingMenu(levels, level),
+      thinkingButtons(levels, level),
+    );
+    await this.adapter.answerCallback(callback, `Thinking set to ${level}`);
   }
 
   private async sendStatus(
@@ -426,6 +472,11 @@ function formatWorkspaceMenu(workspaces: WorkspaceListItem[]): string {
   ].join("\n");
 }
 
+function formatThinkingMenu(levels: ThinkingLevel[], currentLevel: string): string {
+  if (!levels.length) return "Current model does not support thinking levels.";
+  return `Current thinking: ${currentLevel}`;
+}
+
 function formatResumeMenu(sessions: SessionListItem[]): string {
   if (!sessions.length) return "No previous sessions found.";
   return [
@@ -467,6 +518,16 @@ function workspaceButtons(workspaces: WorkspaceListItem[]): InlineButton[][] {
       callbackData: `${WORKSPACE_PREFIX}:${index}`,
     })),
     5,
+  );
+}
+
+function thinkingButtons(levels: ThinkingLevel[], currentLevel: string): InlineButton[][] {
+  return chunkButtons(
+    levels.map((level) => ({
+      text: level === currentLevel ? `${level} ✓` : level,
+      callbackData: `${THINKING_PREFIX}:${level}`,
+    })),
+    3,
   );
 }
 
@@ -518,6 +579,10 @@ function formatModelLine(
   thinkingLevel: string,
 ): string {
   return `${provider}/${modelName} • ${thinkingLevel}`;
+}
+
+function isThinkingLevel(value: string): value is ThinkingLevel {
+  return ["off", "minimal", "low", "medium", "high", "xhigh"].includes(value);
 }
 
 function formatNumber(value: number | null): string {
