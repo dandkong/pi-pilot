@@ -23,4 +23,4 @@ RUN mkdir -p /workspace && chown -R bun:bun /app /workspace
 
 USER bun
 
-CMD ["bun", "run", "start"]
+CMD ["bun", "/app/index.ts"]
