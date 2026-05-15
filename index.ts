@@ -39,18 +39,21 @@ const [{ TelegramAdapter }, { TELEGRAM_COMMANDS }, { ChatRuntime }] = await Prom
   import("./src/runtime/chat-runtime.ts"),
 ]);
 const adapter = new TelegramAdapter(config.telegramToken, TELEGRAM_COMMANDS);
-const runtime = new ChatRuntime(config, adapter);
+const runtime = new ChatRuntime(config, adapter, {
+  onExitRequest: () => shutdown("/exit", true),
+});
 
 adapter.onMessage((message) => runtime.handleMessage(message));
 adapter.onCallback((callback) => runtime.handleCallback(callback));
 
 let shuttingDown = false;
-const shutdown = async (signal: string) => {
+const shutdown = async (signal: string, exit = false) => {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`Received ${signal}. Stopping Pi Pilot backend...`);
   await adapter.stop().catch((error) => console.error("Failed to stop adapter", error));
   runtime.dispose();
+  if (exit) process.exit(0);
 };
 
 process.once("SIGINT", () => void shutdown("SIGINT"));

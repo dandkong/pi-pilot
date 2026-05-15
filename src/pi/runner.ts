@@ -398,6 +398,12 @@ export class PiRunner {
     return this.getWorkspace().setThinkingLevel(level);
   }
 
+  async reload(): Promise<void> {
+    this.workspace?.dispose();
+    this.workspace = undefined;
+    await this.getWorkspace().init();
+  }
+
   async getRuntimeStatus(): Promise<RuntimeStatus> {
     return this.getWorkspace().getRuntimeStatus();
   }

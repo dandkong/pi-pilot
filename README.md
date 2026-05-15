@@ -29,6 +29,8 @@ For Docker, mount the agent data directory to `/home/bun/.pi/agent`.
 | `/new` | Start a fresh session |
 | `/stop` | Abort the running task and clear queued messages |
 | `/compact` | Compact conversation context |
+| `/reload` | Reload the current pi session and resources |
+| `/exit` | Exit the pi-pilot process |
 
 ## Run from Source
 

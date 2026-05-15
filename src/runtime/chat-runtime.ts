@@ -19,6 +19,10 @@ export type ChatState = {
 
 export type ChatStateGetter = (chatId: string) => Promise<ChatState>;
 
+export type ChatRuntimeOptions = {
+  onExitRequest?: () => Promise<void> | void;
+};
+
 export class ChatRuntime {
   private readonly chats = new Map<string, ChatState>();
   private readonly commands: ChatCommands;
@@ -26,9 +30,12 @@ export class ChatRuntime {
   constructor(
     private readonly config: RuntimeConfig,
     private readonly adapter: ChatAdapter,
+    options: ChatRuntimeOptions = {},
   ) {
-    this.commands = new ChatCommands(adapter, (chatId) =>
-      this.getChatState(chatId),
+    this.commands = new ChatCommands(
+      adapter,
+      (chatId) => this.getChatState(chatId),
+      options.onExitRequest,
     );
   }
 

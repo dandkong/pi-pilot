@@ -7,7 +7,7 @@ import type {
 } from "../adapters/types.ts";
 import type { ModelInfo, ProviderModels, RunnerStatus } from "../pi/runner.ts";
 import type { SessionListItem, ThinkingLevel, WorkspaceListItem } from "../pi/runner.ts";
-import type { ChatStateGetter } from "./chat-runtime.ts";
+import type { ChatState, ChatStateGetter } from "./chat-runtime.ts";
 
 const MODELS_HOME = "models:home";
 const RESUME_PREFIX = "resume";
@@ -23,14 +23,25 @@ export const TELEGRAM_COMMANDS: TelegramCommand[] = [
   { command: "new", description: "Start a new session" },
   { command: "stop", description: "Abort current task" },
   { command: "compact", description: "Compact context" },
+  { command: "reload", description: "Reload current pi session" },
+  { command: "exit", description: "Exit pi-pilot process" },
   { command: "start", description: "Welcome and quick start" },
   { command: "help", description: "Show available commands" },
 ];
+
+type ActivityState = {
+  state: ChatState;
+  busy: boolean;
+  streaming: boolean;
+  compacting: boolean;
+  queued: number;
+};
 
 export class ChatCommands {
   constructor(
     private readonly adapter: ChatAdapter,
     private readonly getChatState: ChatStateGetter,
+    private readonly onExitRequest?: () => Promise<void> | void,
   ) {}
 
   async handleMessage(message: ChatMessage): Promise<boolean> {
@@ -84,6 +95,16 @@ export class ChatCommands {
 
     if (command === "compact") {
       await this.sendCompact(message.chatId, message.messageId);
+      return true;
+    }
+
+    if (command === "reload") {
+      await this.sendReload(message.chatId, message.messageId);
+      return true;
+    }
+
+    if (command === "exit") {
+      await this.sendExit(message.chatId, message.messageId);
       return true;
     }
 
@@ -155,20 +176,18 @@ export class ChatCommands {
     chatId: string,
     replyToMessageId?: string,
   ): Promise<void> {
-    const state = await this.getChatState(chatId);
-    const runtimeStatus = await state.runner.getRuntimeStatus();
-    const queued = state.queue.length;
-    if (!state.busy && !runtimeStatus.isStreaming && queued === 0) {
+    const activity = await this.getActivityState(chatId);
+    if (!activity.busy && !activity.streaming && activity.queued === 0) {
       await this.adapter.sendMessage(chatId, "Nothing to stop - no task is running.", {
         replyToMessageId,
       });
       return;
     }
-    state.queue.length = 0;
-    await state.runner.abort();
+    activity.state.queue.length = 0;
+    await activity.state.runner.abort();
     await this.adapter.sendMessage(
       chatId,
-      `Task aborted. Cleared ${queued} queued message${queued === 1 ? "" : "s"}.`,
+      `Task aborted. Cleared ${activity.queued} queued message${activity.queued === 1 ? "" : "s"}.`,
       { replyToMessageId },
     );
   }
@@ -177,15 +196,14 @@ export class ChatCommands {
     chatId: string,
     replyToMessageId?: string,
   ): Promise<void> {
-    const state = await this.getChatState(chatId);
-    const runtimeStatus = await state.runner.getRuntimeStatus();
-    if (runtimeStatus.isCompacting) {
+    const activity = await this.getActivityState(chatId);
+    if (activity.compacting) {
       await this.adapter.sendMessage(chatId, "Compaction is already running.", {
         replyToMessageId,
       });
       return;
     }
-    if (state.busy || runtimeStatus.isStreaming || state.queue.length > 0) {
+    if (activity.busy || activity.streaming || activity.queued > 0) {
       await this.adapter.sendMessage(
         chatId,
         "Cannot compact while a task is running or messages are queued. Use /stop or wait for completion.",
@@ -194,7 +212,7 @@ export class ChatCommands {
       return;
     }
 
-    await state.runner.compact();
+    await activity.state.runner.compact();
   }
 
   private async sendResumeMenu(
@@ -242,18 +260,14 @@ export class ChatCommands {
     chatId: string,
     replyToMessageId?: string,
   ): Promise<void> {
-    const state = await this.getChatState(chatId);
-    const runtimeStatus = await state.runner.getRuntimeStatus();
-    if (state.busy || runtimeStatus.isStreaming || runtimeStatus.isCompacting || state.queue.length > 0) {
-      await this.adapter.sendMessage(
-        chatId,
-        "Cannot start a new session while a task is running or compaction is in progress. Use /stop or wait for completion.",
-        { replyToMessageId },
-      );
-      return;
-    }
+    const activity = await this.requireIdleMessage(
+      chatId,
+      replyToMessageId,
+      "Cannot start a new session while a task is running or compaction is in progress. Use /stop or wait for completion.",
+    );
+    if (!activity) return;
 
-    const sessionId = await state.runner.newSession();
+    const sessionId = await activity.state.runner.newSession();
     await this.adapter.sendMessage(
       chatId,
       `New session started.\nSession: ${sessionId.slice(0, 8)}`,
@@ -266,14 +280,10 @@ export class ChatCommands {
     const index = Number(rawIndex);
     if (!Number.isInteger(index)) throw new Error("Invalid session index");
 
-    const state = await this.getChatState(callback.chatId);
-    const runtimeStatus = await state.runner.getRuntimeStatus();
-    if (state.busy || runtimeStatus.isStreaming || runtimeStatus.isCompacting || state.queue.length > 0) {
-      await this.adapter.answerCallback(callback, "Cannot switch session while a task is running");
-      return;
-    }
+    const activity = await this.requireIdleCallback(callback, "Cannot switch session while a task is running");
+    if (!activity) return;
 
-    const target = await state.runner.switchSession(index);
+    const target = await activity.state.runner.switchSession(index);
     const label = formatSessionLabel(target);
     await this.editCallbackMessage(callback, `Resumed session:\n${label}`, []);
     await this.adapter.answerCallback(callback, `Resumed ${target.id.slice(0, 8)}`);
@@ -284,14 +294,10 @@ export class ChatCommands {
     const index = Number(rawIndex);
     if (!Number.isInteger(index)) throw new Error("Invalid workspace index");
 
-    const state = await this.getChatState(callback.chatId);
-    const runtimeStatus = await state.runner.getRuntimeStatus();
-    if (state.busy || runtimeStatus.isStreaming || runtimeStatus.isCompacting || state.queue.length > 0) {
-      await this.adapter.answerCallback(callback, "Cannot switch workspace while a task is running");
-      return;
-    }
+    const activity = await this.requireIdleCallback(callback, "Cannot switch workspace while a task is running");
+    if (!activity) return;
 
-    const workspace = await state.runner.switchWorkspace(index);
+    const workspace = await activity.state.runner.switchWorkspace(index);
     await this.editCallbackMessage(callback, `Workspace selected:\nWorkspace: ${workspace.cwd}`, []);
     await this.adapter.answerCallback(callback, "Workspace selected");
     await this.sendStatus(callback.chatId);
@@ -301,21 +307,47 @@ export class ChatCommands {
     const rawLevel = callback.data.slice(`${THINKING_PREFIX}:`.length);
     if (!isThinkingLevel(rawLevel)) throw new Error("Invalid thinking level");
 
-    const state = await this.getChatState(callback.chatId);
-    const runtimeStatus = await state.runner.getRuntimeStatus();
-    if (state.busy || runtimeStatus.isStreaming || runtimeStatus.isCompacting || state.queue.length > 0) {
-      await this.adapter.answerCallback(callback, "Cannot change thinking while a task is running");
-      return;
-    }
+    const activity = await this.requireIdleCallback(callback, "Cannot change thinking while a task is running");
+    if (!activity) return;
 
-    const level = await state.runner.setThinkingLevel(rawLevel);
-    const levels = await state.runner.getAvailableThinkingLevels();
+    const level = await activity.state.runner.setThinkingLevel(rawLevel);
+    const levels = await activity.state.runner.getAvailableThinkingLevels();
     await this.editCallbackMessage(
       callback,
       formatThinkingMenu(levels, level),
       thinkingButtons(levels, level),
     );
     await this.adapter.answerCallback(callback, `Thinking set to ${level}`);
+  }
+
+  private async sendReload(
+    chatId: string,
+    replyToMessageId?: string,
+  ): Promise<void> {
+    const activity = await this.requireIdleMessage(
+      chatId,
+      replyToMessageId,
+      "Cannot reload while a task is running or messages are queued. Use /stop or wait for completion.",
+    );
+    if (!activity) return;
+
+    await activity.state.runner.reload();
+    await this.adapter.sendMessage(chatId, "Reloaded current pi session.", { replyToMessageId });
+    await this.sendStatus(chatId);
+  }
+
+  private async sendExit(
+    chatId: string,
+    replyToMessageId?: string,
+  ): Promise<void> {
+    await this.adapter.sendMessage(
+      chatId,
+      "Exiting pi-pilot. Docker will restart it if restart policy is enabled.",
+      { replyToMessageId },
+    );
+    setTimeout(() => {
+      void this.onExitRequest?.();
+    }, 100);
   }
 
   private async sendStatus(
@@ -393,6 +425,41 @@ export class ChatCommands {
     await this.adapter.answerCallback(callback, `Model set to ${model.name}`);
   }
 
+  private async getActivityState(chatId: string): Promise<ActivityState> {
+    const state = await this.getChatState(chatId);
+    const runtimeStatus = await state.runner.getRuntimeStatus();
+    return {
+      state,
+      busy: state.busy,
+      streaming: runtimeStatus.isStreaming,
+      compacting: runtimeStatus.isCompacting,
+      queued: state.queue.length,
+    };
+  }
+
+  private async requireIdleMessage(
+    chatId: string,
+    replyToMessageId: string | undefined,
+    message: string,
+  ): Promise<ActivityState | undefined> {
+    const activity = await this.getActivityState(chatId);
+    if (!isActive(activity)) return activity;
+
+    await this.adapter.sendMessage(chatId, message, { replyToMessageId });
+    return undefined;
+  }
+
+  private async requireIdleCallback(
+    callback: ChatCallback,
+    message: string,
+  ): Promise<ActivityState | undefined> {
+    const activity = await this.getActivityState(callback.chatId);
+    if (!isActive(activity)) return activity;
+
+    await this.adapter.answerCallback(callback, message);
+    return undefined;
+  }
+
   private async editCallbackMessage(
     callback: ChatCallback,
     text: string,
@@ -406,6 +473,10 @@ export class ChatCommands {
       buttons,
     });
   }
+}
+
+function isActive(activity: ActivityState): boolean {
+  return activity.busy || activity.streaming || activity.compacting || activity.queued > 0;
 }
 
 function formatHelp(): string {
