@@ -80,6 +80,14 @@ Available options:
 
 ## Docker
 
+### First-time Setup
+
+After starting the container, run pi inside the container to configure credentials and select a model:
+
+```bash
+docker exec -it pi-pilot pi
+```
+
 ### Use the published image
 
 ```yaml
@@ -88,29 +96,16 @@ services:
     image: dandkong/pi-pilot:latest
     container_name: pi-pilot
     restart: unless-stopped
-    working_dir: /workspace/project-a
+    working_dir: /workspace
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS}
-      PI_PILOT_WORKSPACES: /workspace/project-a,/workspace/project-b
+      PI_PILOT_WORKSPACES: /workspace,/workspace-a
       PI_PILOT_LOG_LEVEL: info
       TZ: Asia/Shanghai
     volumes:
       - /path/to/projects:/workspace
       - /path/to/pi:/home/bun/.pi
-```
-
-Then run:
-
-```bash
-docker compose up -d
-```
-
-Keep secrets in `.env`, not directly in `docker-compose.yml`:
-
-```env
-TELEGRAM_BOT_TOKEN=123456:your-token
-TELEGRAM_ALLOWED_USERS=123456789
 ```
 
 ### Build locally

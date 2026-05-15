@@ -24,7 +24,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 COPY . .
-RUN mkdir -p /workspace && chown -R bun:bun /app /workspace
+RUN ln -s /app/node_modules/.bin/pi /usr/local/bin/pi && mkdir -p /workspace && chown -R bun:bun /app /workspace
 
 USER bun
 
