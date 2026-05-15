@@ -5,6 +5,7 @@ services:
     build: .
     image: pi-pilot:latest
     restart: unless-stopped
+    working_dir: /workspace
     env_file:
       - .env
     environment:

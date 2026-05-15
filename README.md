@@ -85,6 +85,7 @@ services:
     image: dandkong/pi-pilot:latest
     container_name: pi-pilot
     restart: unless-stopped
+    working_dir: /workspace/project-a
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS}
@@ -93,7 +94,7 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - /path/to/projects:/workspace
-      - /path/to/pi-agent:/home/bun/.pi/agent
+      - /path/to/pi:/home/bun/.pi
 ```
 
 Then run:
@@ -132,7 +133,7 @@ If `PI_PILOT_WORKSPACES` is set, the first path is the default workspace and `/w
 PI_PILOT_WORKSPACES=/workspace/project-a,/workspace/project-b
 ```
 
-If `PI_PILOT_WORKSPACES` is not set, pi-pilot uses the directory where the process starts.
+If `PI_PILOT_WORKSPACES` is not set, pi-pilot uses the directory where the process starts. In Docker, set `working_dir` to the mounted workspace or set `PI_PILOT_WORKSPACES` explicitly.
 
 ## Access Control
 
