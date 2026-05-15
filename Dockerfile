@@ -1,4 +1,9 @@
+FROM ghcr.io/astral-sh/uv:latest AS uv
+
 FROM oven/bun:latest
+
+COPY --from=uv /uv /usr/local/bin/uv
+COPY --from=uv /uvx /usr/local/bin/uvx
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
