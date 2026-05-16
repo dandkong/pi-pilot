@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { logger } from "../logger.ts";
+import { chunkText } from "../render/chunking.ts";
 import { renderTelegramHtml } from "../render/telegram-html.ts";
 import type {
   ChatAttachment,
@@ -19,7 +20,14 @@ import type {
 } from "./types.ts";
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
+const TELEGRAM_MARKDOWN_CHUNK_LIMIT = 3200;
 const log = logger.child("telegram");
+
+type PreparedTelegramMessage = {
+  text: string;
+  parseMode?: "HTML";
+  fallbackText?: string;
+};
 
 export class TelegramAdapter implements ChatAdapter {
   private readonly bot: Bot;
@@ -72,12 +80,11 @@ export class TelegramAdapter implements ChatAdapter {
   }
 
   async sendMessage(chatId: string, text: string, options?: SendMessageOptions): Promise<SentMessage[]> {
-    const content = prepareTelegramMessage(text || "(no response)", options?.render);
-    const chunks = splitTelegramMessage(content.text);
+    const chunks = prepareTelegramMessages(text || "(no response)", options?.render);
     const sent: SentMessage[] = [];
     for (const [index, chunk] of chunks.entries()) {
       const messageOptions = {
-        parse_mode: content.parseMode,
+        parse_mode: chunk.parseMode,
         link_preview_options: { is_disabled: true },
         reply_parameters:
           index === 0 && options?.replyToMessageId
@@ -85,10 +92,10 @@ export class TelegramAdapter implements ChatAdapter {
             : undefined,
         reply_markup: index === chunks.length - 1 ? toInlineKeyboard(options?.buttons) : undefined,
       };
-      const message = await this.bot.api.sendMessage(chatId, chunk, messageOptions).catch((error) => {
-        if (!content.fallbackText) throw error;
+      const message = await this.bot.api.sendMessage(chatId, chunk.text, messageOptions).catch((error) => {
+        if (!chunk.fallbackText) throw error;
         log.warn("formatted send failed, retrying as plain text", formatGrammyError(error));
-        return this.bot.api.sendMessage(chatId, content.fallbackText, {
+        return this.bot.api.sendMessage(chatId, chunk.fallbackText, {
           ...messageOptions,
           parse_mode: undefined,
         });
@@ -109,28 +116,44 @@ export class TelegramAdapter implements ChatAdapter {
     const [message] = await this.sendMessage(chatId, "...", { ...options, render: "plain" });
     if (!message) return undefined;
 
+    const messages: Array<{ messageId: string; text: string; parseMode?: "HTML" }> = [
+      { messageId: message.messageId, text: "..." },
+    ];
+
+    const sync = async (text: string, finished = false) => {
+      const chunks = prepareTelegramMessages(text.trim() || (finished ? "(no response)" : ""), options?.render);
+      if (!chunks.length || !chunks[0]?.text.trim()) return;
+
+      for (const [index, chunk] of chunks.entries()) {
+        const existing = messages[index];
+        if (!existing) {
+          const [sent] = await this.sendMessage(chatId, chunk.fallbackText ?? chunk.text, {
+            render: "plain",
+          });
+          if (sent) messages.push({ messageId: sent.messageId, text: "" });
+        }
+
+        const target = messages[index];
+        if (!target) continue;
+        if (target.text === chunk.text && target.parseMode === chunk.parseMode) continue;
+
+        await this.editStreamMessage(chatId, target.messageId, chunk.text, chunk.parseMode).catch((error) => {
+          if (!chunk.fallbackText) throw error;
+          log.warn("formatted stream edit failed, retrying as plain text", formatGrammyError(error));
+          return this.editStreamMessage(chatId, target.messageId, chunk.fallbackText, undefined);
+        });
+        target.text = chunk.text;
+        target.parseMode = chunk.parseMode;
+      }
+    };
+
     return {
       update: async (text) => {
         if (!text.trim()) return;
-        await this.editStreamMessage(chatId, message.messageId, limitTelegramText(text));
+        await sync(text);
       },
       finish: async (text) => {
-        const finalText = text.trim() || "(no response)";
-        if (finalText.length > TELEGRAM_MESSAGE_LIMIT) {
-          const chunks = splitTelegramMessage(finalText);
-          await this.editStreamMessage(chatId, message.messageId, chunks[0] ?? "(no response)");
-          for (const chunk of chunks.slice(1)) {
-            await this.sendMessage(chatId, chunk);
-          }
-          return;
-        }
-
-        const content = prepareTelegramMessage(finalText, options?.render);
-        await this.editStreamMessage(chatId, message.messageId, limitTelegramText(content.text), content.parseMode).catch((error) => {
-          if (!content.fallbackText) throw error;
-          log.warn("formatted stream finish failed, retrying as plain text", formatGrammyError(error));
-          return this.editStreamMessage(chatId, message.messageId, limitTelegramText(content.fallbackText), undefined);
-        });
+        await sync(text, true);
       },
     };
   }
@@ -271,14 +294,22 @@ export class TelegramAdapter implements ChatAdapter {
   }
 }
 
+function prepareTelegramMessages(
+  text: string,
+  render: SendMessageOptions["render"] = "plain",
+): PreparedTelegramMessage[] {
+  const limit = render === "markdown" ? TELEGRAM_MARKDOWN_CHUNK_LIMIT : TELEGRAM_MESSAGE_LIMIT;
+  return chunkText(text, limit).map((chunk) => prepareTelegramMessage(chunk, render));
+}
+
 function prepareTelegramMessage(
   text: string,
   render: SendMessageOptions["render"] = "plain",
-): { text: string; parseMode?: "HTML"; fallbackText?: string } {
+): PreparedTelegramMessage {
   if (render !== "markdown") return { text };
 
   const html = renderTelegramHtml(text);
-  if (html.length > 3_900) return { text };
+  if (html.length > TELEGRAM_MESSAGE_LIMIT) return { text };
   return { text: html, parseMode: "HTML", fallbackText: text };
 }
 
@@ -293,19 +324,6 @@ function toInlineKeyboard(buttons: InlineButton[][] | undefined): InlineKeyboard
     keyboard.row();
   }
   return keyboard;
-}
-
-function limitTelegramText(text: string): string {
-  if (text.length <= TELEGRAM_MESSAGE_LIMIT) return text;
-  return `${text.slice(0, TELEGRAM_MESSAGE_LIMIT - 20)}\n...(truncated)`;
-}
-
-function splitTelegramMessage(text: string) {
-  const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += TELEGRAM_MESSAGE_LIMIT) {
-    chunks.push(text.slice(i, i + TELEGRAM_MESSAGE_LIMIT));
-  }
-  return chunks.length ? chunks : [""];
 }
 
 function isMessageNotModified(error: unknown): boolean {
