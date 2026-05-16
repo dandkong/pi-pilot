@@ -250,7 +250,7 @@ export class ChatCommands {
     const state = await this.getChatState(chatId);
     const status = await state.runner.getStatus();
     const levels = await state.runner.getAvailableThinkingLevels();
-    await this.adapter.sendMessage(chatId, formatThinkingMenu(levels, status.thinkingLevel), {
+    await this.adapter.sendMessage(chatId, formatThinkingMenu(levels, status.thinkingLevel, status.model), {
       replyToMessageId,
       buttons: thinkingButtons(levels, status.thinkingLevel),
     });
@@ -312,9 +312,10 @@ export class ChatCommands {
 
     const level = await activity.state.runner.setThinkingLevel(rawLevel);
     const levels = await activity.state.runner.getAvailableThinkingLevels();
+    const status = await activity.state.runner.getStatus();
     await this.editCallbackMessage(
       callback,
-      formatThinkingMenu(levels, level),
+      formatThinkingMenu(levels, level, status.model),
       thinkingButtons(levels, level),
     );
     await this.adapter.answerCallback(callback, `Thinking set to ${level}`);
@@ -371,7 +372,7 @@ export class ChatCommands {
     const state = await this.getChatState(chatId);
     const groups = await state.runner.getProviderModels();
     const status = await state.runner.getStatus();
-    await this.adapter.sendMessage(chatId, formatProviderMenu(groups, status.model), {
+    await this.adapter.sendMessage(chatId, formatProviderMenu(groups, status.model, status.thinkingLevel), {
       replyToMessageId,
       buttons: providerButtons(groups),
     });
@@ -383,7 +384,7 @@ export class ChatCommands {
     const status = await state.runner.getStatus();
     await this.editCallbackMessage(
       callback,
-      formatProviderMenu(groups, status.model),
+      formatProviderMenu(groups, status.model, status.thinkingLevel),
       providerButtons(groups),
     );
   }
@@ -528,9 +529,15 @@ function formatStatus(status: RunnerStatus, busy: boolean, queuedMessages: numbe
   ].join("\n");
 }
 
-function formatProviderMenu(groups: ProviderModels[], currentModel?: ModelInfo): string {
+function formatProviderMenu(
+  groups: ProviderModels[],
+  currentModel?: ModelInfo,
+  thinkingLevel?: string,
+): string {
   if (!groups.length) return "No available models. Check your pi auth/config.";
-  const current = currentModel ? `Current: ${currentModel.provider}/${currentModel.name}\n\n` : "";
+  const current = currentModel
+    ? `Current: ${formatCurrentModel(currentModel, thinkingLevel)}\n\n`
+    : "";
   return `${current}Choose a provider:`;
 }
 
@@ -543,9 +550,16 @@ function formatWorkspaceMenu(workspaces: WorkspaceListItem[]): string {
   ].join("\n");
 }
 
-function formatThinkingMenu(levels: ThinkingLevel[], currentLevel: string): string {
+function formatThinkingMenu(
+  levels: ThinkingLevel[],
+  currentLevel: string,
+  currentModel?: ModelInfo,
+): string {
   if (!levels.length) return "Current model does not support thinking levels.";
-  return `Current thinking: ${currentLevel}`;
+  const current = currentModel
+    ? formatCurrentModel(currentModel, currentLevel)
+    : `thinking ${currentLevel}`;
+  return `Current: ${current}\n\nChoose thinking level:`;
 }
 
 function formatResumeMenu(sessions: SessionListItem[]): string {
@@ -650,6 +664,12 @@ function formatModelLine(
   thinkingLevel: string,
 ): string {
   return `${provider}/${modelName} • ${thinkingLevel}`;
+}
+
+function formatCurrentModel(model: ModelInfo, thinkingLevel?: string): string {
+  return thinkingLevel
+    ? formatModelLine(model.provider, model.name, thinkingLevel)
+    : `${model.provider}/${model.name}`;
 }
 
 function isThinkingLevel(value: string): value is ThinkingLevel {
