@@ -21,7 +21,13 @@ import type {
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 const TELEGRAM_MARKDOWN_CHUNK_LIMIT = 3200;
+const MEDIA_GROUP_FLUSH_MS = 1_000;
 const log = logger.child("telegram");
+
+type MediaGroupState = {
+  messages: ChatMessage[];
+  timer: Timer;
+};
 
 type PreparedTelegramMessage = {
   text: string;
@@ -33,6 +39,7 @@ export class TelegramAdapter implements ChatAdapter {
   private readonly bot: Bot;
   private readonly messageHandlers: Array<(message: ChatMessage) => Promise<void>> = [];
   private readonly callbackHandlers: Array<(callback: ChatCallback) => Promise<void>> = [];
+  private readonly mediaGroups = new Map<string, MediaGroupState>();
   private started = false;
 
   private readonly tmpDir: string;
@@ -48,6 +55,7 @@ export class TelegramAdapter implements ChatAdapter {
     this.bot.on("message:photo", async (ctx) => this.handleFileMessage(ctx));
     this.bot.on("message:document", async (ctx) => this.handleFileMessage(ctx));
     this.bot.on("message:video", async (ctx) => this.handleFileMessage(ctx));
+    this.bot.on("message:audio", async (ctx) => this.handleFileMessage(ctx));
     this.bot.on("message:voice", async (ctx) => this.handleFileMessage(ctx));
     this.bot.on("callback_query:data", async (ctx) => this.handleCallback(ctx));
     this.bot.catch((error) => {
@@ -76,6 +84,8 @@ export class TelegramAdapter implements ChatAdapter {
   async stop(): Promise<void> {
     if (!this.started) return;
     this.started = false;
+    for (const state of this.mediaGroups.values()) clearTimeout(state.timer);
+    this.mediaGroups.clear();
     await this.bot.stop();
   }
 
@@ -225,6 +235,14 @@ export class TelegramAdapter implements ChatAdapter {
       if (attachment) attachments.push(attachment);
     }
 
+    // Handle audio
+    if (message.audio) {
+      const audio = message.audio;
+      const rawName = audio.file_name ?? `audio_${Date.now()}.mp3`;
+      const attachment = await this.downloadFile(audio.file_id, `${Date.now()}_${rawName}`, audio.mime_type, audio.file_size);
+      if (attachment) attachments.push(attachment);
+    }
+
     // Handle voice
     if (message.voice) {
       const voice = message.voice;
@@ -240,11 +258,56 @@ export class TelegramAdapter implements ChatAdapter {
       messageId: String(message.message_id),
       userId: String(message.from?.id ?? message.chat.id),
       username: message.from?.username ?? message.from?.first_name,
-      text: text || "(user sent file(s))",
+      text,
       attachments,
     };
 
-    this.dispatchMessage(chatMessage);
+    if (message.media_group_id) {
+      this.enqueueMediaGroup(message.chat.id, message.media_group_id, chatMessage);
+      return;
+    }
+
+    this.dispatchMessage({
+      ...chatMessage,
+      text: chatMessage.text || "(user sent file(s))",
+    });
+  }
+
+  private enqueueMediaGroup(chatId: string | number, mediaGroupId: string, message: ChatMessage): void {
+    const key = `${chatId}:${mediaGroupId}`;
+    const existing = this.mediaGroups.get(key);
+    if (existing) clearTimeout(existing.timer);
+
+    const state: MediaGroupState = existing ?? {
+      messages: [],
+      timer: setTimeout(() => undefined, 0),
+    };
+    state.messages.push(message);
+    state.timer = setTimeout(() => this.flushMediaGroup(key), MEDIA_GROUP_FLUSH_MS);
+    this.mediaGroups.set(key, state);
+  }
+
+  private flushMediaGroup(key: string): void {
+    const state = this.mediaGroups.get(key);
+    if (!state) return;
+    this.mediaGroups.delete(key);
+
+    const messages = [...state.messages].sort((a, b) => Number(a.messageId) - Number(b.messageId));
+    const first = messages[0];
+    if (!first) return;
+
+    const text = messages
+      .map((message) => message.text.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    const attachments = messages.flatMap((message) => message.attachments ?? []);
+    if (!attachments.length) return;
+
+    this.dispatchMessage({
+      ...first,
+      text: text || "(user sent file(s))",
+      attachments,
+    });
   }
 
   private async downloadFile(fileId: string, fileName: string, mimeType?: string, fileSize?: number): Promise<ChatAttachment | undefined> {

@@ -276,8 +276,8 @@ function createTurnStreamSender(adapter: ChatAdapter, message: ChatMessage) {
 
 function formatPrompt(text: string, attachments?: ChatAttachment[]): string {
   if (!attachments?.length) return text;
-  const fileList = attachments.map((a) => a.file).join(", ");
-  const prefix = `<attached>${fileList}</attached>`;
+  const fileList = attachments.map((a) => a.file).join("\n");
+  const prefix = `<attached>\n${fileList}\n</attached>`;
   return text ? `${prefix}\n${text}` : prefix;
 }
 
