@@ -5,14 +5,31 @@ import type {
   InlineButton,
   TelegramCommand,
 } from "../adapters/types.ts";
-import type { ModelInfo, ProviderModels, RecentMessage, RunnerStatus } from "../pi/runner.ts";
-import type { SessionListItem, ThinkingLevel, WorkspaceListItem } from "../pi/runner.ts";
+import type { ThinkingLevel } from "../pi/runner.ts";
 import type { ChatState, ChatStateGetter } from "./chat-runtime.ts";
-
-const MODELS_HOME = "models:home";
-const RESUME_PREFIX = "resume";
-const THINKING_PREFIX = "thinking";
-const WORKSPACE_PREFIX = "workspace";
+import {
+  MODELS_HOME,
+  RESUME_PREFIX,
+  THINKING_PREFIX,
+  WORKSPACE_PREFIX,
+  modelButtons,
+  providerButtons,
+  resumeButtons,
+  thinkingButtons,
+  workspaceButtons,
+} from "./chat-command-buttons.ts";
+import {
+  formatHelp,
+  formatModelLine,
+  formatModelMenu,
+  formatProviderMenu,
+  formatRecentMessages,
+  formatResumeMenu,
+  formatSessionLabel,
+  formatStatus,
+  formatThinkingMenu,
+  formatWorkspaceMenu,
+} from "./chat-command-format.ts";
 
 export const TELEGRAM_COMMANDS: TelegramCommand[] = [
   { command: "status", description: "Show current session status" },
@@ -126,7 +143,7 @@ export class ChatCommands {
   }
 
   private async sendHelp(message: ChatMessage): Promise<void> {
-    await this.adapter.sendMessage(message.chatId, formatHelp(), {
+    await this.adapter.sendMessage(message.chatId, formatHelp(TELEGRAM_COMMANDS), {
       replyToMessageId: message.messageId,
     });
   }
@@ -495,219 +512,11 @@ function isActive(activity: ActivityState): boolean {
   return activity.busy || activity.streaming || activity.compacting || activity.queued > 0;
 }
 
-function formatHelp(): string {
-  return [
-    "Available commands:",
-    ...TELEGRAM_COMMANDS.map((item) => `/${item.command} - ${item.description}`),
-    "",
-    "You can also send a request directly.",
-  ].join("\n");
-}
-
 function parseCommand(text: string): string | undefined {
   const match = text.trim().match(/^\/(\w+)(?:@\w+)?(?:\s|$)/);
   return match?.[1]?.toLowerCase();
 }
 
-function formatStatus(status: RunnerStatus, busy: boolean, queuedMessages: number): string {
-  const model = status.model
-    ? formatModelLine(
-        status.model.provider,
-        status.model.name,
-        status.thinkingLevel,
-      )
-    : "No model selected";
-  const context = status.context
-    ? `${formatNumber(status.context.tokens)} / ${formatNumber(status.context.contextWindow)}${
-        status.context.percent === null
-          ? ""
-          : ` (${status.context.percent.toFixed(1)}%)`
-      }`
-    : "unknown";
-  const session = status.sessionId.slice(0, 8);
-  const cost = status.stats.cost ? `$${status.stats.cost.toFixed(4)}` : "$0";
-
-  return [
-    "Status",
-    `Model: ${model}`,
-    `Context: ${context}`,
-    `Workspace: ${status.cwd}`,
-    `Session: ${session}`,
-    `Busy: ${busy || status.isStreaming ? "yes" : "no"}`,
-    `Streaming: ${status.isStreaming ? "yes" : "no"}`,
-    `Compacting: ${status.isCompacting ? "yes" : "no"}`,
-    `Queue: ${queuedMessages}`,
-    `Messages: ${status.stats.totalMessages} (${status.stats.userMessages} user / ${status.stats.assistantMessages} assistant)`,
-    `Tools: ${status.activeTools.length}`,
-    `Skills: ${status.skillCount}`,
-    `Cost: ${cost}`,
-  ].join("\n");
-}
-
-function formatProviderMenu(
-  groups: ProviderModels[],
-  currentModel?: ModelInfo,
-  thinkingLevel?: string,
-): string {
-  if (!groups.length) return "No available models. Check your pi auth/config.";
-  const current = currentModel
-    ? `Current: ${formatCurrentModel(currentModel, thinkingLevel)}\n\n`
-    : "";
-  return `${current}Choose a provider:`;
-}
-
-function formatWorkspaceMenu(workspaces: WorkspaceListItem[]): string {
-  return [
-    "Choose workspace:",
-    ...workspaces.map((workspace, index) =>
-      `${index + 1}. ${workspace.cwd}${workspace.current ? " (current)" : ""}`,
-    ),
-  ].join("\n");
-}
-
-function formatThinkingMenu(
-  levels: ThinkingLevel[],
-  currentLevel: string,
-  currentModel?: ModelInfo,
-): string {
-  if (!levels.length) return "Current model does not support thinking levels.";
-  const current = currentModel
-    ? formatCurrentModel(currentModel, currentLevel)
-    : `thinking ${currentLevel}`;
-  return `Current: ${current}\n\nChoose thinking level:`;
-}
-
-function formatResumeMenu(sessions: SessionListItem[]): string {
-  if (!sessions.length) return "No previous sessions found.";
-  return [
-    "Resume a session:",
-    ...sessions.map((s, index) => `${index + 1}. ${formatSessionLabel(s)}`),
-  ].join("\n");
-}
-
-function formatRecentMessages(messages: RecentMessage[]): string {
-  if (!messages.length) return "No recent user, assistant, or summary messages.";
-  return messages
-    .map((message) => `${recentRoleIcon(message.role)} ${truncate(normalizeRecentText(message.text), 100) ?? ""}`)
-    .join("\n");
-}
-
-function recentRoleIcon(role: RecentMessage["role"]): string {
-  if (role === "User") return "👤";
-  if (role === "Assistant") return "🧑‍💻";
-  return "📝";
-}
-
-function normalizeRecentText(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-function formatSessionLabel(session: SessionListItem): string {
-  const id = session.id.slice(0, 8);
-  const msgs = `${session.messageCount} msg${session.messageCount === 1 ? "" : "s"}`;
-  const label = session.name || truncate(session.firstMessage, 40) || "(no messages)";
-  const time = formatRelativeTime(session.modified);
-  return `${id} • ${msgs} - ${label} • ${time}`;
-}
-
-function formatRelativeTime(date: Date): string {
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function resumeButtons(sessions: SessionListItem[]): InlineButton[][] {
-  return [sessions.map((_, index) => ({
-    text: String(index + 1),
-    callbackData: `${RESUME_PREFIX}:${index}`,
-  }))];
-}
-
-function workspaceButtons(workspaces: WorkspaceListItem[]): InlineButton[][] {
-  return chunkButtons(
-    workspaces.map((_, index) => ({
-      text: String(index + 1),
-      callbackData: `${WORKSPACE_PREFIX}:${index}`,
-    })),
-    5,
-  );
-}
-
-function thinkingButtons(levels: ThinkingLevel[], currentLevel: string): InlineButton[][] {
-  return chunkButtons(
-    levels.map((level) => ({
-      text: level === currentLevel ? `${level} ✓` : level,
-      callbackData: `${THINKING_PREFIX}:${level}`,
-    })),
-    3,
-  );
-}
-
-function formatModelMenu(group: ProviderModels): string {
-  return `Choose a model from ${group.provider}:`;
-}
-
-function providerButtons(groups: ProviderModels[]): InlineButton[][] {
-  return chunkButtons(
-    groups.map((group) => ({
-      text: `${group.provider} (${group.models.length})`,
-      callbackData: `models:provider:${encodeURIComponent(group.provider)}`,
-    })),
-    2,
-  );
-}
-
-function modelButtons(group: ProviderModels): InlineButton[][] {
-  const rows = chunkButtons(
-    group.models.map((model, index) => ({
-      text: model.name,
-      callbackData: `models:set:${encodeURIComponent(group.provider)}:${index}`,
-    })),
-    2,
-  );
-  rows.push([{ text: "Back to providers", callbackData: MODELS_HOME }]);
-  return rows;
-}
-
-function truncate(value: string | undefined, limit = 100): string | undefined {
-  if (!value) return undefined;
-  return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
-}
-
-function chunkButtons(
-  buttons: InlineButton[],
-  columns: number,
-): InlineButton[][] {
-  const rows: InlineButton[][] = [];
-  for (let i = 0; i < buttons.length; i += columns) {
-    rows.push(buttons.slice(i, i + columns));
-  }
-  return rows;
-}
-
-function formatModelLine(
-  provider: string,
-  modelName: string,
-  thinkingLevel: string,
-): string {
-  return `${provider}/${modelName} • ${thinkingLevel}`;
-}
-
-function formatCurrentModel(model: ModelInfo, thinkingLevel?: string): string {
-  return thinkingLevel
-    ? formatModelLine(model.provider, model.name, thinkingLevel)
-    : `${model.provider}/${model.name}`;
-}
-
 function isThinkingLevel(value: string): value is ThinkingLevel {
   return ["off", "minimal", "low", "medium", "high", "xhigh"].includes(value);
-}
-
-function formatNumber(value: number | null): string {
-  return value === null ? "unknown" : Math.round(value).toLocaleString("en-US");
 }
