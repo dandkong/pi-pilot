@@ -89,6 +89,11 @@ export type RuntimeStatus = {
   isCompacting: boolean;
 };
 
+export type RecentMessage = {
+  role: "User" | "Assistant" | "Summary";
+  text: string;
+};
+
 /**
  * Workspace: cwd-bound session management.
  * Owns settings, sessions, and agent session for a single working directory.
@@ -203,6 +208,14 @@ class Workspace {
       isStreaming: session.isStreaming,
       isCompacting: session.isCompacting,
     };
+  }
+
+  async getRecentMessages(limit = 6): Promise<RecentMessage[]> {
+    const session = await this.getSession();
+    return session.messages
+      .map(toRecentMessage)
+      .filter((message): message is RecentMessage => !!message && !!message.text.trim())
+      .slice(-limit);
   }
 
   async setModel(provider: string, modelIndex: number): Promise<ModelInfo> {
@@ -408,6 +421,10 @@ export class PiRunner {
     return this.getWorkspace().getRuntimeStatus();
   }
 
+  async getRecentMessages(limit = 6): Promise<RecentMessage[]> {
+    return this.getWorkspace().getRecentMessages(limit);
+  }
+
   async abort(): Promise<void> {
     return this.getWorkspace().abort();
   }
@@ -472,6 +489,50 @@ export class PiRunner {
     if (!this.modelRegistry) throw new Error("Pi model registry was not initialized");
     return this.modelRegistry;
   }
+}
+
+function toRecentMessage(message: unknown): RecentMessage | undefined {
+  if (!message || typeof message !== "object" || !("role" in message)) return undefined;
+  const record = message as Record<string, unknown>;
+  const role = record.role;
+
+  if (role === "user") {
+    return { role: "User", text: contentToText(record.content) };
+  }
+
+  if (role === "assistant") {
+    return { role: "Assistant", text: contentToText(record.content) };
+  }
+
+  if (role === "compactionSummary") {
+    return { role: "Summary", text: stringValue(record.summary) };
+  }
+
+  if (role === "branchSummary") {
+    return { role: "Summary", text: stringValue(record.summary) };
+  }
+
+  return undefined;
+}
+
+function contentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+
+  return content
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      const record = part as Record<string, unknown>;
+      if (record.type === "text") return stringValue(record.text);
+      if (record.type === "image") return "[image]";
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function logAgentEvent(event: unknown): void {

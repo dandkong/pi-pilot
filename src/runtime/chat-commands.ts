@@ -5,7 +5,7 @@ import type {
   InlineButton,
   TelegramCommand,
 } from "../adapters/types.ts";
-import type { ModelInfo, ProviderModels, RunnerStatus } from "../pi/runner.ts";
+import type { ModelInfo, ProviderModels, RecentMessage, RunnerStatus } from "../pi/runner.ts";
 import type { SessionListItem, ThinkingLevel, WorkspaceListItem } from "../pi/runner.ts";
 import type { ChatState, ChatStateGetter } from "./chat-runtime.ts";
 
@@ -20,6 +20,7 @@ export const TELEGRAM_COMMANDS: TelegramCommand[] = [
   { command: "models", description: "Choose model" },
   { command: "thinking", description: "Set thinking level" },
   { command: "resume", description: "Resume a previous session" },
+  { command: "recent", description: "Show recent session messages" },
   { command: "new", description: "Start a new session" },
   { command: "stop", description: "Abort current task" },
   { command: "compact", description: "Compact context" },
@@ -80,6 +81,11 @@ export class ChatCommands {
 
     if (command === "resume") {
       await this.sendResumeMenu(message.chatId, message.messageId);
+      return true;
+    }
+
+    if (command === "recent") {
+      await this.sendRecentMessages(message.chatId, message.messageId);
       return true;
     }
 
@@ -254,6 +260,15 @@ export class ChatCommands {
       replyToMessageId,
       buttons: thinkingButtons(levels, status.thinkingLevel),
     });
+  }
+
+  private async sendRecentMessages(
+    chatId: string,
+    replyToMessageId?: string,
+  ): Promise<void> {
+    const state = await this.getState();
+    const messages = await state.runner.getRecentMessages();
+    await this.adapter.sendMessage(chatId, formatRecentMessages(messages), { replyToMessageId });
   }
 
   private async sendNewSession(
@@ -568,6 +583,23 @@ function formatResumeMenu(sessions: SessionListItem[]): string {
     "Resume a session:",
     ...sessions.map((s, index) => `${index + 1}. ${formatSessionLabel(s)}`),
   ].join("\n");
+}
+
+function formatRecentMessages(messages: RecentMessage[]): string {
+  if (!messages.length) return "No recent user, assistant, or summary messages.";
+  return messages
+    .map((message) => `${recentRoleIcon(message.role)} ${truncate(normalizeRecentText(message.text), 100) ?? ""}`)
+    .join("\n");
+}
+
+function recentRoleIcon(role: RecentMessage["role"]): string {
+  if (role === "User") return "👤";
+  if (role === "Assistant") return "🧑‍💻";
+  return "📝";
+}
+
+function normalizeRecentText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 function formatSessionLabel(session: SessionListItem): string {
