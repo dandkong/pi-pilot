@@ -123,12 +123,7 @@ export class TelegramAdapter implements ChatAdapter {
   }
 
   async startTextStream(chatId: string, options?: SendMessageOptions): Promise<ChatTextStream | undefined> {
-    const [message] = await this.sendMessage(chatId, "...", { ...options, render: "plain" });
-    if (!message) return undefined;
-
-    const messages: Array<{ messageId: string; text: string; parseMode?: "HTML" }> = [
-      { messageId: message.messageId, text: "..." },
-    ];
+    const messages: Array<{ messageId: string; text: string; parseMode?: "HTML" }> = [];
 
     const sync = async (text: string, finished = false) => {
       const chunks = prepareTelegramMessages(text.trim() || (finished ? "(no response)" : ""), options?.render);
@@ -137,10 +132,9 @@ export class TelegramAdapter implements ChatAdapter {
       for (const [index, chunk] of chunks.entries()) {
         const existing = messages[index];
         if (!existing) {
-          const [sent] = await this.sendMessage(chatId, chunk.fallbackText ?? chunk.text, {
-            render: "plain",
-          });
-          if (sent) messages.push({ messageId: sent.messageId, text: "" });
+          const sent = await this.sendStreamMessage(chatId, chunk, index === 0 ? options : undefined);
+          if (sent) messages.push({ messageId: sent.messageId, text: chunk.text, parseMode: chunk.parseMode });
+          continue;
         }
 
         const target = messages[index];
@@ -166,6 +160,30 @@ export class TelegramAdapter implements ChatAdapter {
         await sync(text, true);
       },
     };
+  }
+
+  private async sendStreamMessage(
+    chatId: string,
+    chunk: PreparedTelegramMessage,
+    options?: SendMessageOptions,
+  ): Promise<SentMessage | undefined> {
+    const messageOptions = {
+      parse_mode: chunk.parseMode,
+      link_preview_options: { is_disabled: true },
+      reply_parameters: options?.replyToMessageId
+        ? { message_id: Number(options.replyToMessageId) }
+        : undefined,
+      reply_markup: toInlineKeyboard(options?.buttons),
+    };
+    const message = await this.bot.api.sendMessage(chatId, chunk.text, messageOptions).catch((error) => {
+      if (!chunk.fallbackText) throw error;
+      log.warn("formatted stream send failed, retrying as plain text", formatGrammyError(error));
+      return this.bot.api.sendMessage(chatId, chunk.fallbackText, {
+        ...messageOptions,
+        parse_mode: undefined,
+      });
+    });
+    return { messageId: String(message.message_id) };
   }
 
   private async editStreamMessage(chatId: string, messageId: string, text: string, parseMode?: "HTML"): Promise<void> {
