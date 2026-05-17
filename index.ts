@@ -60,4 +60,5 @@ process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 console.log(`Pi Pilot backend started. workspace=${config.workspaces[0]}`);
+await runtime.warmup();
 await adapter.start();

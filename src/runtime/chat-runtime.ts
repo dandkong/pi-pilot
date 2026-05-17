@@ -17,14 +17,16 @@ export type ChatState = {
   queue: ChatMessage[];
 };
 
-export type ChatStateGetter = (chatId: string) => Promise<ChatState>;
+export type ChatStateGetter = () => Promise<ChatState>;
 
 export type ChatRuntimeOptions = {
   onExitRequest?: () => Promise<void> | void;
 };
 
 export class ChatRuntime {
-  private readonly chats = new Map<string, ChatState>();
+  private state: ChatState | undefined;
+  private initPromise: Promise<void> | undefined;
+  private activeChatId: string | undefined;
   private readonly commands: ChatCommands;
 
   constructor(
@@ -34,12 +36,14 @@ export class ChatRuntime {
   ) {
     this.commands = new ChatCommands(
       adapter,
-      (chatId) => this.getChatState(chatId),
+      () => this.getState(),
       options.onExitRequest,
     );
   }
 
   async handleMessage(message: ChatMessage): Promise<void> {
+    this.activeChatId = message.chatId;
+
     if (!this.isAllowedUser(message.userId)) {
       log.warn(`[chat ${message.chatId}] rejected unauthorized user`, {
         userId: message.userId,
@@ -58,7 +62,7 @@ export class ChatRuntime {
     const prompt = formatPrompt(message.text.trim(), message.attachments);
     if (!prompt) return;
 
-    const state = await this.getChatState(message.chatId);
+    const state = await this.getState();
     state.queue.push(message);
 
     if (state.busy) {
@@ -72,10 +76,12 @@ export class ChatRuntime {
       return;
     }
 
-    await this.processQueue(message.chatId, state);
+    await this.processQueue(state);
   }
 
   async handleCallback(callback: ChatCallback): Promise<void> {
+    this.activeChatId = callback.chatId;
+
     if (!this.isAllowedUser(callback.userId)) {
       log.warn(`[chat ${callback.chatId}] rejected unauthorized callback`, {
         userId: callback.userId,
@@ -87,12 +93,24 @@ export class ChatRuntime {
     await this.commands.handleCallback(callback);
   }
 
-  dispose(): void {
-    for (const state of this.chats.values()) {
-      state.queue.length = 0;
-      state.runner.dispose();
+  async warmup(): Promise<void> {
+    if (this.state) return;
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = this.initializeState();
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = undefined;
     }
-    this.chats.clear();
+  }
+
+  dispose(): void {
+    if (!this.state) return;
+    this.state.queue.length = 0;
+    this.state.runner.dispose();
+    this.state = undefined;
+    this.activeChatId = undefined;
   }
 
   private isAllowedUser(userId: string): boolean {
@@ -100,23 +118,32 @@ export class ChatRuntime {
     return allowed.length === 0 || allowed.includes(userId);
   }
 
-  private async getChatState(chatId: string): Promise<ChatState> {
-    const existing = this.chats.get(chatId);
-    if (existing) return existing;
+  private async getState(): Promise<ChatState> {
+    await this.warmup();
+    return this.requireState();
+  }
 
+  private requireState(): ChatState {
+    if (!this.state) {
+      throw new Error("Chat runtime is not initialized");
+    }
+    return this.state;
+  }
+
+  private async initializeState(): Promise<void> {
     const runner = new PiRunner(this.config);
     const state = { runner, busy: false, queue: [] };
-    this.chats.set(chatId, state);
     await runner.init();
 
-    // Subscribe to compaction events
     runner.setCompactionCallback((event) => {
+      const chatId = this.activeChatId;
+      if (!chatId) return;
       this.handleCompactionEvent(chatId, event).catch((error) => {
         log.error(`[chat ${chatId}] compaction notification failed`, error);
       });
     });
 
-    return state;
+    this.state = state;
   }
 
   private async handleCompactionEvent(chatId: string, event: CompactionEvent): Promise<void> {
@@ -139,7 +166,7 @@ export class ChatRuntime {
     }
   }
 
-  private async processQueue(chatId: string, state: ChatState): Promise<void> {
+  private async processQueue(state: ChatState): Promise<void> {
     if (state.busy) return;
     state.busy = true;
 
@@ -151,11 +178,11 @@ export class ChatRuntime {
       }
     } finally {
       state.busy = false;
-      log.info(`[chat ${chatId}] queue drained`);
     }
   }
 
   private async runQueuedMessage(message: ChatMessage, state: ChatState): Promise<void> {
+    this.activeChatId = message.chatId;
     const runtimeStatus = await state.runner.getRuntimeStatus();
     if (runtimeStatus.isCompacting) {
       await this.adapter.sendMessage(

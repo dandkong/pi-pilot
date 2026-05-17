@@ -40,7 +40,7 @@ type ActivityState = {
 export class ChatCommands {
   constructor(
     private readonly adapter: ChatAdapter,
-    private readonly getChatState: ChatStateGetter,
+    private readonly getState: ChatStateGetter,
     private readonly onExitRequest?: () => Promise<void> | void,
   ) {}
 
@@ -219,7 +219,7 @@ export class ChatCommands {
     chatId: string,
     replyToMessageId?: string,
   ): Promise<void> {
-    const state = await this.getChatState(chatId);
+    const state = await this.getState();
     const sessions = await state.runner.listSessions();
     if (!sessions.length) {
       await this.adapter.sendMessage(chatId, "No previous sessions found.", { replyToMessageId });
@@ -235,7 +235,7 @@ export class ChatCommands {
     chatId: string,
     replyToMessageId?: string,
   ): Promise<void> {
-    const state = await this.getChatState(chatId);
+    const state = await this.getState();
     const workspaces = state.runner.listWorkspaces();
     await this.adapter.sendMessage(chatId, formatWorkspaceMenu(workspaces), {
       replyToMessageId,
@@ -247,7 +247,7 @@ export class ChatCommands {
     chatId: string,
     replyToMessageId?: string,
   ): Promise<void> {
-    const state = await this.getChatState(chatId);
+    const state = await this.getState();
     const status = await state.runner.getStatus();
     const levels = await state.runner.getAvailableThinkingLevels();
     await this.adapter.sendMessage(chatId, formatThinkingMenu(levels, status.thinkingLevel, status.model), {
@@ -355,7 +355,7 @@ export class ChatCommands {
     chatId: string,
     replyToMessageId?: string,
   ): Promise<void> {
-    const state = await this.getChatState(chatId);
+    const state = await this.getState();
     await this.adapter.sendMessage(
       chatId,
       formatStatus(await state.runner.getStatus(), state.busy, state.queue.length),
@@ -369,7 +369,7 @@ export class ChatCommands {
     chatId: string,
     replyToMessageId?: string,
   ): Promise<void> {
-    const state = await this.getChatState(chatId);
+    const state = await this.getState();
     const groups = await state.runner.getProviderModels();
     const status = await state.runner.getStatus();
     await this.adapter.sendMessage(chatId, formatProviderMenu(groups, status.model, status.thinkingLevel), {
@@ -379,7 +379,7 @@ export class ChatCommands {
   }
 
   private async editModelProviders(callback: ChatCallback): Promise<void> {
-    const state = await this.getChatState(callback.chatId);
+    const state = await this.getState();
     const groups = await state.runner.getProviderModels();
     const status = await state.runner.getStatus();
     await this.editCallbackMessage(
@@ -393,7 +393,7 @@ export class ChatCommands {
     callback: ChatCallback,
     provider: string,
   ): Promise<void> {
-    const state = await this.getChatState(callback.chatId);
+    const state = await this.getState();
     const groups = await state.runner.getProviderModels();
     const group = groups.find((item) => item.provider === provider);
     if (!group) throw new Error(`No available models for ${provider}`);
@@ -414,7 +414,7 @@ export class ChatCommands {
     const modelIndex = Number(rawIndex);
     if (!Number.isInteger(modelIndex)) throw new Error("Invalid model index");
 
-    const state = await this.getChatState(callback.chatId);
+    const state = await this.getState();
     const model = await state.runner.setModel(provider, modelIndex);
     const status = await state.runner.getStatus();
 
@@ -427,7 +427,7 @@ export class ChatCommands {
   }
 
   private async getActivityState(chatId: string): Promise<ActivityState> {
-    const state = await this.getChatState(chatId);
+    const state = await this.getState();
     const runtimeStatus = await state.runner.getRuntimeStatus();
     return {
       state,
