@@ -20,11 +20,28 @@ rules.em_open = () => "<i>";
 rules.em_close = () => "</i>";
 rules.s_open = () => "<s>";
 rules.s_close = () => "</s>";
-rules.bullet_list_open = () => "";
-rules.bullet_list_close = () => "\n";
-rules.ordered_list_open = () => "";
-rules.ordered_list_close = () => "\n";
-rules.list_item_open = () => "- ";
+rules.bullet_list_open = (_tokens, _index, _options, env) => {
+  getListStack(env).push({ type: "bullet" });
+  return "";
+};
+rules.bullet_list_close = (_tokens, _index, _options, env) => {
+  getListStack(env).pop();
+  return "\n";
+};
+rules.ordered_list_open = (tokens, index, _options, env) => {
+  const start = Number(tokens[index]?.attrGet("start") ?? "1");
+  getListStack(env).push({ type: "ordered", next: Number.isFinite(start) ? start : 1 });
+  return "";
+};
+rules.ordered_list_close = (_tokens, _index, _options, env) => {
+  getListStack(env).pop();
+  return "\n";
+};
+rules.list_item_open = (_tokens, _index, _options, env) => {
+  const current = getListStack(env).at(-1);
+  if (current?.type !== "ordered") return "- ";
+  return `${current.next++}. `;
+};
 rules.list_item_close = () => "\n";
 rules.blockquote_open = () => "<blockquote>";
 rules.blockquote_close = () => "</blockquote>\n\n";
@@ -38,7 +55,19 @@ rules.link_open = renderLinkOpen;
 rules.link_close = () => "</a>";
 
 export function renderTelegramHtml(text: string): string {
-  return markdown.render(text).trim();
+  return markdown.render(text, {}).trim();
+}
+
+type ListFrame = { type: "bullet" } | { type: "ordered"; next: number };
+
+type RenderEnv = {
+  listStack?: ListFrame[];
+};
+
+function getListStack(env: unknown): ListFrame[] {
+  const renderEnv = env as RenderEnv;
+  renderEnv.listStack ??= [];
+  return renderEnv.listStack;
 }
 
 function renderCodeBlock(content: string): string {
