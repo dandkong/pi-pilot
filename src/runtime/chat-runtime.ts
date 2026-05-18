@@ -116,7 +116,7 @@ export class ChatRuntime {
   }
 
   private isAllowedUser(userId: string): boolean {
-    return this.config.allowedTelegramUsers.includes(userId);
+    return this.config.allowedActorIds.includes(userId);
   }
 
   private resolveNotificationTarget(): ChatTarget | undefined {
@@ -124,7 +124,7 @@ export class ChatRuntime {
   }
 
   private defaultNotificationTarget(): ChatTarget | undefined {
-    const chatId = this.config.defaultTelegramChatId ?? this.config.allowedTelegramUsers[0];
+    const chatId = this.config.defaultTargetId ?? this.config.allowedActorIds[0];
     return chatId ? { chatId } : undefined;
   }
 

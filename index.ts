@@ -33,12 +33,12 @@ try {
   process.exit(1);
 }
 
-const [{ TelegramAdapter }, { TELEGRAM_COMMANDS }, { ChatRuntime }] = await Promise.all([
+const [{ TelegramAdapter }, { CHAT_COMMANDS }, { ChatRuntime }] = await Promise.all([
   import("./src/adapters/telegram.ts"),
   import("./src/runtime/chat-commands.ts"),
   import("./src/runtime/chat-runtime.ts"),
 ]);
-const adapter = new TelegramAdapter(config.telegramToken, TELEGRAM_COMMANDS);
+const adapter = new TelegramAdapter(config.telegramToken, CHAT_COMMANDS);
 const runtime = new ChatRuntime(config, adapter, {
   onExitRequest: () => shutdown("/exit", true),
 });
@@ -59,7 +59,7 @@ const shutdown = async (signal: string, exit = false) => {
 process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-if (config.allowedTelegramUsers.length === 0) {
+if (config.allowedActorIds.length === 0) {
   console.warn("TELEGRAM_ALLOWED_USERS is empty; all Telegram users will be rejected.");
 }
 

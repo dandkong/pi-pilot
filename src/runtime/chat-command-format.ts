@@ -1,8 +1,8 @@
-import type { TelegramCommand } from "../adapters/types.ts";
+import type { ChatCommand } from "../adapters/types.ts";
 import type { ModelInfo, ProviderModels, RecentMessage, RunnerStatus } from "../pi/runner.ts";
 import type { SessionListItem, ThinkingLevel, WorkspaceListItem } from "../pi/runner.ts";
 
-export function formatHelp(commands: TelegramCommand[]): string {
+export function formatHelp(commands: ChatCommand[]): string {
   return [
     "Available commands:",
     ...commands.map((item) => `/${item.command} - ${item.description}`),

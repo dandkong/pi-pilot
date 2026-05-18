@@ -3,7 +3,7 @@ import type {
   ChatCallback,
   ChatMessage,
   InlineButton,
-  TelegramCommand,
+  ChatCommand,
 } from "../adapters/types.ts";
 import type { ThinkingLevel } from "../pi/runner.ts";
 import type { ChatState, ChatStateGetter } from "./chat-runtime.ts";
@@ -31,7 +31,7 @@ import {
   formatWorkspaceMenu,
 } from "./chat-command-format.ts";
 
-export const TELEGRAM_COMMANDS: TelegramCommand[] = [
+export const CHAT_COMMANDS: ChatCommand[] = [
   { command: "status", description: "Show current session status" },
   { command: "workspaces", description: "Switch workspace" },
   { command: "models", description: "Choose model" },
@@ -143,7 +143,7 @@ export class ChatCommands {
   }
 
   private async sendHelp(message: ChatMessage): Promise<void> {
-    await this.adapter.sendMessage(message.chatId, formatHelp(TELEGRAM_COMMANDS), {
+    await this.adapter.sendMessage(message.chatId, formatHelp(CHAT_COMMANDS), {
       replyToMessageId: message.messageId,
     });
   }

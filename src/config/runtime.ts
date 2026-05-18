@@ -5,8 +5,8 @@ import { type ConfigOverrides, type LogLevel, resolveConfigValues } from "./sche
 export type RuntimeConfig = {
   telegramToken: string;
   workspaces: string[];
-  allowedTelegramUsers: string[];
-  defaultTelegramChatId?: string;
+  allowedActorIds: string[];
+  defaultTargetId?: string;
   logLevel: LogLevel;
 };
 
@@ -17,8 +17,8 @@ export function loadConfig(overrides: ConfigOverrides = {}): RuntimeConfig {
   return {
     telegramToken,
     workspaces: parseWorkspaces(values.workspaces),
-    allowedTelegramUsers: parseList(values.allowedTelegramUsers),
-    defaultTelegramChatId: values.defaultTelegramChatId,
+    allowedActorIds: parseList(values.allowedTelegramUsers),
+    defaultTargetId: values.defaultTelegramChatId,
     logLevel: requiredValue(values.logLevel, "PI_PILOT_LOG_LEVEL") as LogLevel,
   };
 }

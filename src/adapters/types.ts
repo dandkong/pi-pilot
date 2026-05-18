@@ -5,7 +5,7 @@ export type InlineButton = {
   callbackData: string;
 };
 
-export type TelegramCommand = {
+export type ChatCommand = {
   command: string;
   description: string;
 };

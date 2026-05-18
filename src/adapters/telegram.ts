@@ -16,7 +16,7 @@ import type {
   InlineButton,
   SendMessageOptions,
   SentMessage,
-  TelegramCommand,
+  ChatCommand,
 } from "./types.ts";
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
@@ -46,7 +46,7 @@ export class TelegramAdapter implements ChatAdapter {
 
   constructor(
     token: string,
-    private readonly commands: TelegramCommand[] = [],
+    private readonly commands: ChatCommand[] = [],
   ) {
     this.bot = new Bot(token);
     this.tmpDir = join(tmpdir(), "pi-pilot");
