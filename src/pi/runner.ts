@@ -311,6 +311,10 @@ class Workspace {
     this.settingsManager = settingsManager;
     this.session = session;
 
+    // SDK direct createAgentSession() does not emit extension session_start by itself.
+    // Bind extensions explicitly so session_start/resources_discover lifecycle hooks run.
+    await session.bindExtensions({});
+
     // Subscribe once for host-level notifications that are not tied to a run callback.
     this.unsubscribeSession?.();
     this.unsubscribeSession = session.subscribe((event) => {
