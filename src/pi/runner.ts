@@ -44,7 +44,6 @@ export type RunOptions = {
 };
 
 export type CompactionCallback = (event: CompactionEvent) => void;
-export type AgentEndCallback = (text: string) => void;
 
 export type SessionListItem = {
   id: string;
@@ -105,7 +104,6 @@ class Workspace {
   private settingsManager: SettingsManager | undefined;
   private initPromise: Promise<void> | undefined;
   private compactionCallback: CompactionCallback | undefined;
-  private agentEndCallback: AgentEndCallback | undefined;
   private unsubscribeSession: (() => void) | undefined;
 
   constructor(
@@ -116,10 +114,6 @@ class Workspace {
 
   setCompactionCallback(callback: CompactionCallback): void {
     this.compactionCallback = callback;
-  }
-
-  setAgentEndCallback(callback: AgentEndCallback): void {
-    this.agentEndCallback = callback;
   }
 
   async init(): Promise<void> {
@@ -334,10 +328,6 @@ class Workspace {
           errorMessage: event.errorMessage,
         });
       }
-      if (event.type === "agent_end") {
-        const text = extractLastAssistantText(event.messages).trim();
-        if (text) this.agentEndCallback?.(text);
-      }
     });
 
     const skills = session.resourceLoader.getSkills().skills;
@@ -370,7 +360,6 @@ export class PiRunner {
   private workspace: Workspace | undefined;
   private currentCwd: string;
   private compactionCallback: CompactionCallback | undefined;
-  private agentEndCallback: AgentEndCallback | undefined;
 
   constructor(private readonly config: RuntimeConfig) {
     this.currentCwd = config.workspaces[0] ?? process.cwd();
@@ -383,11 +372,6 @@ export class PiRunner {
   setCompactionCallback(callback: CompactionCallback): void {
     this.compactionCallback = callback;
     this.getWorkspace().setCompactionCallback(callback);
-  }
-
-  setAgentEndCallback(callback: AgentEndCallback): void {
-    this.agentEndCallback = callback;
-    this.getWorkspace().setAgentEndCallback(callback);
   }
 
   async run(prompt: string, options?: RunOptions): Promise<string> {
@@ -500,7 +484,6 @@ export class PiRunner {
 
       this.workspace = new Workspace(this.currentCwd, this.authStorage, this.modelRegistry);
       if (this.compactionCallback) this.workspace.setCompactionCallback(this.compactionCallback);
-      if (this.agentEndCallback) this.workspace.setAgentEndCallback(this.agentEndCallback);
     }
     return this.workspace;
   }
@@ -509,18 +492,6 @@ export class PiRunner {
     if (!this.modelRegistry) throw new Error("Pi model registry was not initialized");
     return this.modelRegistry;
   }
-}
-
-function extractLastAssistantText(messages: unknown[]): string {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index];
-    if (!message || typeof message !== "object") continue;
-    const record = message as Record<string, unknown>;
-    if (record.role !== "assistant") continue;
-    const text = contentToText(record.content).trim();
-    if (text) return text;
-  }
-  return "";
 }
 
 function toRecentMessage(message: unknown): RecentMessage | undefined {

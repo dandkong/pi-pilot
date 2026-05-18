@@ -32,7 +32,6 @@ export class ChatRuntime {
   private state: ChatState | undefined;
   private initPromise: Promise<void> | undefined;
   private currentTurnTarget: ChatTarget | undefined;
-  private managedRunDepth = 0;
   private readonly commands: ChatCommands;
 
   constructor(
@@ -166,18 +165,6 @@ export class ChatRuntime {
       });
     });
 
-    runner.setAgentEndCallback((text) => {
-      if (this.managedRunDepth > 0) return;
-      const target = this.defaultNotificationTarget();
-      if (!target) {
-        log.warn("dropping background agent output: no default chat configured");
-        return;
-      }
-      this.adapter.sendMessage(target.chatId, text).catch((error) => {
-        log.error(`[chat ${target.chatId}] background agent output failed`, error);
-      });
-    });
-
     this.state = state;
   }
 
@@ -241,12 +228,9 @@ export class ChatRuntime {
         const response = createTurnStreamSender(this.adapter, message);
         const startedAt = Date.now();
         const prompt = formatPrompt(message.text.trim(), message.attachments);
-        this.managedRunDepth++;
         const answer = await state.runner.run(prompt, {
           onTextDelta: (delta) => response.pushText(delta),
           onToolStart: (event) => response.pushToolStart(event),
-        }).finally(() => {
-          this.managedRunDepth--;
         });
         await response.finish(answer || "(no response)");
         log.info(`[chat ${message.chatId}] turn completed`, {
