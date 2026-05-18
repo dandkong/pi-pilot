@@ -59,6 +59,10 @@ const shutdown = async (signal: string, exit = false) => {
 process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
+if (config.allowedTelegramUsers.length === 0) {
+  console.warn("TELEGRAM_ALLOWED_USERS is empty; all Telegram users will be rejected.");
+}
+
 console.log(`Pi Pilot backend started. workspace=${config.workspaces[0]}`);
 await runtime.warmup();
 await adapter.start();

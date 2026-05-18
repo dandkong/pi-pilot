@@ -39,6 +39,7 @@ Create `.env`:
 ```env
 TELEGRAM_BOT_TOKEN=123456:your-token
 TELEGRAM_ALLOWED_USERS=123456789
+TELEGRAM_DEFAULT_CHAT_ID=123456789
 PI_PILOT_WORKSPACES=/path/to/project,/path/to/other-project
 PI_PILOT_LOG_LEVEL=info
 ```
@@ -65,6 +66,7 @@ Run with CLI options:
 pi-pilot \
   --telegram-token 123456:your-token \
   --allowed-users 123456789 \
+  --default-chat-id 123456789 \
   --workspaces /path/to/project,/path/to/other-project \
   --log-level info
 ```
@@ -75,7 +77,8 @@ Available options:
 |--------|----------------------|-------------|
 | `--telegram-token`, `--bot-token` | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
 | `--workspaces` | `PI_PILOT_WORKSPACES` | Comma-separated workspace paths |
-| `--allowed-users` | `TELEGRAM_ALLOWED_USERS` | Comma-separated Telegram user IDs |
+| `--allowed-users` | `TELEGRAM_ALLOWED_USERS` | Comma-separated Telegram user IDs allowed to interact |
+| `--default-chat-id` | `TELEGRAM_DEFAULT_CHAT_ID` | Default Telegram chat ID for proactive notifications |
 | `--log-level` | `PI_PILOT_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, or `silent` |
 
 ## Docker
@@ -100,6 +103,7 @@ services:
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS}
+      TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID}
       PI_PILOT_WORKSPACES: /workspace,/workspace-a
       PI_PILOT_LOG_LEVEL: info
       TZ: Asia/Shanghai
@@ -135,13 +139,23 @@ If `PI_PILOT_WORKSPACES` is not set, pi-pilot uses the directory where the proce
 
 ## Access Control
 
-Set `TELEGRAM_ALLOWED_USERS` to a comma-separated list of Telegram user IDs:
+Set `TELEGRAM_ALLOWED_USERS` to a comma-separated list of Telegram user IDs allowed to interact:
 
 ```env
 TELEGRAM_ALLOWED_USERS=123456789,987654321
 ```
 
-Leave it empty to allow all users. User IDs are logged when unauthorized users are rejected.
+Leave it empty to deny all users. User IDs are logged when unauthorized users are rejected.
+
+## Proactive Notifications
+
+Set `TELEGRAM_DEFAULT_CHAT_ID` when notifications are not tied to an active user turn, such as background compaction or native pi plugin outputs:
+
+```env
+TELEGRAM_DEFAULT_CHAT_ID=123456789
+```
+
+For groups or supergroups, use the group chat ID, which is often negative or starts with `-100`. If unset, pi-pilot falls back to the first `TELEGRAM_ALLOWED_USERS` entry for personal private-chat setups. If both are empty, proactive notifications are disabled.
 
 ## License
 

@@ -6,6 +6,7 @@ export type RuntimeConfig = {
   telegramToken: string;
   workspaces: string[];
   allowedTelegramUsers: string[];
+  defaultTelegramChatId?: string;
   logLevel: LogLevel;
 };
 
@@ -17,6 +18,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): RuntimeConfig {
     telegramToken,
     workspaces: parseWorkspaces(values.workspaces),
     allowedTelegramUsers: parseList(values.allowedTelegramUsers),
+    defaultTelegramChatId: values.defaultTelegramChatId,
     logLevel: requiredValue(values.logLevel, "PI_PILOT_LOG_LEVEL") as LogLevel,
   };
 }

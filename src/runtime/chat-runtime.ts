@@ -19,6 +19,11 @@ export type ChatState = {
 
 export type ChatStateGetter = () => Promise<ChatState>;
 
+type ChatTarget = {
+  chatId: string;
+  replyToMessageId?: string;
+};
+
 export type ChatRuntimeOptions = {
   onExitRequest?: () => Promise<void> | void;
 };
@@ -26,7 +31,8 @@ export type ChatRuntimeOptions = {
 export class ChatRuntime {
   private state: ChatState | undefined;
   private initPromise: Promise<void> | undefined;
-  private activeChatId: string | undefined;
+  private currentTurnTarget: ChatTarget | undefined;
+  private managedRunDepth = 0;
   private readonly commands: ChatCommands;
 
   constructor(
@@ -42,8 +48,6 @@ export class ChatRuntime {
   }
 
   async handleMessage(message: ChatMessage): Promise<void> {
-    this.activeChatId = message.chatId;
-
     if (!this.isAllowedUser(message.userId)) {
       log.warn(`[chat ${message.chatId}] rejected unauthorized user`, {
         userId: message.userId,
@@ -80,8 +84,6 @@ export class ChatRuntime {
   }
 
   async handleCallback(callback: ChatCallback): Promise<void> {
-    this.activeChatId = callback.chatId;
-
     if (!this.isAllowedUser(callback.userId)) {
       log.warn(`[chat ${callback.chatId}] rejected unauthorized callback`, {
         userId: callback.userId,
@@ -110,12 +112,30 @@ export class ChatRuntime {
     this.state.queue.length = 0;
     this.state.runner.dispose();
     this.state = undefined;
-    this.activeChatId = undefined;
+    this.currentTurnTarget = undefined;
   }
 
   private isAllowedUser(userId: string): boolean {
-    const allowed = this.config.allowedTelegramUsers;
-    return allowed.length === 0 || allowed.includes(userId);
+    return this.config.allowedTelegramUsers.includes(userId);
+  }
+
+  private resolveNotificationTarget(): ChatTarget | undefined {
+    return this.currentTurnTarget ?? this.defaultNotificationTarget();
+  }
+
+  private defaultNotificationTarget(): ChatTarget | undefined {
+    const chatId = this.config.defaultTelegramChatId ?? this.config.allowedTelegramUsers[0];
+    return chatId ? { chatId } : undefined;
+  }
+
+  private async withTarget<T>(target: ChatTarget, action: () => Promise<T>): Promise<T> {
+    const previousTarget = this.currentTurnTarget;
+    this.currentTurnTarget = target;
+    try {
+      return await action();
+    } finally {
+      this.currentTurnTarget = previousTarget;
+    }
   }
 
   private async getState(): Promise<ChatState> {
@@ -136,10 +156,25 @@ export class ChatRuntime {
     await runner.init();
 
     runner.setCompactionCallback((event) => {
-      const chatId = this.activeChatId;
-      if (!chatId) return;
-      this.handleCompactionEvent(chatId, event).catch((error) => {
-        log.error(`[chat ${chatId}] compaction notification failed`, error);
+      const target = this.resolveNotificationTarget();
+      if (!target) {
+        log.warn("dropping compaction notification: no target chat configured");
+        return;
+      }
+      this.handleCompactionEvent(target.chatId, event).catch((error) => {
+        log.error(`[chat ${target.chatId}] compaction notification failed`, error);
+      });
+    });
+
+    runner.setAgentEndCallback((text) => {
+      if (this.managedRunDepth > 0) return;
+      const target = this.defaultNotificationTarget();
+      if (!target) {
+        log.warn("dropping background agent output: no default chat configured");
+        return;
+      }
+      this.adapter.sendMessage(target.chatId, text).catch((error) => {
+        log.error(`[chat ${target.chatId}] background agent output failed`, error);
       });
     });
 
@@ -182,51 +217,59 @@ export class ChatRuntime {
   }
 
   private async runQueuedMessage(message: ChatMessage, state: ChatState): Promise<void> {
-    this.activeChatId = message.chatId;
-    const runtimeStatus = await state.runner.getRuntimeStatus();
-    if (runtimeStatus.isCompacting) {
-      await this.adapter.sendMessage(
-        message.chatId,
-        "Compaction is running. Try again after it finishes.",
-        { replyToMessageId: message.messageId },
-      );
-      return;
-    }
-
-    const typingInterval = setInterval(() => {
-      this.adapter
-        .sendTyping(message.chatId)
-        .catch((error) =>
-          log.warn(`[chat ${message.chatId}] typing failed`, error),
+    await this.withTarget(messageToTarget(message), async () => {
+      const runtimeStatus = await state.runner.getRuntimeStatus();
+      if (runtimeStatus.isCompacting) {
+        await this.adapter.sendMessage(
+          message.chatId,
+          "Compaction is running. Try again after it finishes.",
+          { replyToMessageId: message.messageId },
         );
-    }, 4_000);
+        return;
+      }
 
-    try {
-      await this.adapter.sendTyping(message.chatId);
-      const response = createTurnStreamSender(this.adapter, message);
-      const startedAt = Date.now();
-      const prompt = formatPrompt(message.text.trim(), message.attachments);
-      const answer = await state.runner.run(prompt, {
-        onTextDelta: (delta) => response.pushText(delta),
-        onToolStart: (event) => response.pushToolStart(event),
-      });
-      await response.finish(answer || "(no response)");
-      log.info(`[chat ${message.chatId}] turn completed`, {
-        durationMs: Date.now() - startedAt,
-        outputLength: answer.length,
-        queueLength: state.queue.length,
-      });
-    } catch (error) {
-      log.error(`[chat ${message.chatId}] pi failed`, error);
-      await this.adapter.sendMessage(
-        message.chatId,
-        `Pi failed: ${error instanceof Error ? error.message : String(error)}`,
-        undefined,
-      );
-    } finally {
-      clearInterval(typingInterval);
-    }
+      const typingInterval = setInterval(() => {
+        this.adapter
+          .sendTyping(message.chatId)
+          .catch((error) =>
+            log.warn(`[chat ${message.chatId}] typing failed`, error),
+          );
+      }, 4_000);
+
+      try {
+        await this.adapter.sendTyping(message.chatId);
+        const response = createTurnStreamSender(this.adapter, message);
+        const startedAt = Date.now();
+        const prompt = formatPrompt(message.text.trim(), message.attachments);
+        this.managedRunDepth++;
+        const answer = await state.runner.run(prompt, {
+          onTextDelta: (delta) => response.pushText(delta),
+          onToolStart: (event) => response.pushToolStart(event),
+        }).finally(() => {
+          this.managedRunDepth--;
+        });
+        await response.finish(answer || "(no response)");
+        log.info(`[chat ${message.chatId}] turn completed`, {
+          durationMs: Date.now() - startedAt,
+          outputLength: answer.length,
+          queueLength: state.queue.length,
+        });
+      } catch (error) {
+        log.error(`[chat ${message.chatId}] pi failed`, error);
+        await this.adapter.sendMessage(
+          message.chatId,
+          `Pi failed: ${error instanceof Error ? error.message : String(error)}`,
+          undefined,
+        );
+      } finally {
+        clearInterval(typingInterval);
+      }
+    });
   }
+}
+
+function messageToTarget(message: ChatMessage): ChatTarget {
+  return { chatId: message.chatId, replyToMessageId: message.messageId };
 }
 
 function createTurnStreamSender(adapter: ChatAdapter, message: ChatMessage) {

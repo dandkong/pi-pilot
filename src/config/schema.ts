@@ -1,7 +1,7 @@
 export const LOG_LEVELS = ["debug", "info", "warn", "error", "silent"] as const;
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
-export type ConfigKey = "telegramToken" | "workspaces" | "allowedTelegramUsers" | "logLevel";
+export type ConfigKey = "telegramToken" | "workspaces" | "allowedTelegramUsers" | "defaultTelegramChatId" | "logLevel";
 export type ConfigOverrides = Partial<Record<ConfigKey, string>>;
 export type ResolvedConfigValues = Partial<Record<ConfigKey, string>>;
 
@@ -37,7 +37,14 @@ export const CONFIG_DEFINITIONS: readonly ConfigDefinition[] = [
     env: "TELEGRAM_ALLOWED_USERS",
     flags: ["--allowed-users"],
     valueName: "ids",
-    description: "Comma-separated Telegram user IDs",
+    description: "Comma-separated Telegram user IDs allowed to interact",
+  },
+  {
+    key: "defaultTelegramChatId",
+    env: "TELEGRAM_DEFAULT_CHAT_ID",
+    flags: ["--default-chat-id"],
+    valueName: "chat-id",
+    description: "Default Telegram chat ID for proactive notifications",
   },
   {
     key: "logLevel",

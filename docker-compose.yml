@@ -9,6 +9,7 @@ services:
     env_file:
       - .env
     environment:
+      TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID:-}
       PI_PILOT_WORKSPACES: ${PI_PILOT_WORKSPACES:-/workspace}
       PI_PILOT_LOG_LEVEL: ${PI_PILOT_LOG_LEVEL:-info}
     volumes:
