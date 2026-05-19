@@ -44,7 +44,7 @@ export const CONFIG_DEFINITIONS: readonly ConfigDefinition[] = [
     env: "TELEGRAM_DEFAULT_CHAT_ID",
     flags: ["--default-chat-id"],
     valueName: "chat-id",
-    description: "Default Telegram chat ID for proactive notifications",
+    description: "Default Telegram chat ID for all bot output",
   },
   {
     key: "logLevel",

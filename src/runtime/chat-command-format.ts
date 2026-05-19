@@ -38,9 +38,10 @@ export function formatStatus(status: RunnerStatus, busy: boolean, queuedMessages
     `Busy: ${busy || status.isStreaming ? "yes" : "no"}`,
     `Streaming: ${status.isStreaming ? "yes" : "no"}`,
     `Compacting: ${status.isCompacting ? "yes" : "no"}`,
-    `Queue: ${queuedMessages}`,
+    `Queue: ${queuedMessages + status.pendingMessages}`,
     `Messages: ${status.stats.totalMessages} (${status.stats.userMessages} user / ${status.stats.assistantMessages} assistant)`,
     `Tools: ${status.activeTools.length}`,
+    `Extensions: ${status.extensionCount}`,
     `Skills: ${status.skillCount}`,
     `Cost: ${cost}`,
   ].join("\n");

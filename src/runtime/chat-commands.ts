@@ -466,7 +466,7 @@ export class ChatCommands {
       busy: state.busy,
       streaming: runtimeStatus.isStreaming,
       compacting: runtimeStatus.isCompacting,
-      queued: state.queue.length,
+      queued: state.queue.length + runtimeStatus.pendingMessages,
     };
   }
 

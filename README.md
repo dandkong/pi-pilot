@@ -78,7 +78,7 @@ Available options:
 | `--telegram-token`, `--bot-token` | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
 | `--workspaces` | `PI_PILOT_WORKSPACES` | Comma-separated workspace paths |
 | `--allowed-users` | `TELEGRAM_ALLOWED_USERS` | Comma-separated Telegram user IDs allowed to interact |
-| `--default-chat-id` | `TELEGRAM_DEFAULT_CHAT_ID` | Default Telegram chat ID for proactive notifications |
+| `--default-chat-id` | `TELEGRAM_DEFAULT_CHAT_ID` | Default Telegram chat ID for all bot output |
 | `--log-level` | `PI_PILOT_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, or `silent` |
 
 ## Docker
@@ -147,15 +147,15 @@ TELEGRAM_ALLOWED_USERS=123456789,987654321
 
 Leave it empty to deny all users. User IDs are logged when unauthorized users are rejected.
 
-## Proactive Notifications
+## Default Output Chat
 
-Set `TELEGRAM_DEFAULT_CHAT_ID` when notifications are not tied to an active user turn, such as background compaction or native pi plugin outputs:
+Set `TELEGRAM_DEFAULT_CHAT_ID` to route bot output to one private chat, group, or supergroup:
 
 ```env
 TELEGRAM_DEFAULT_CHAT_ID=123456789
 ```
 
-For groups or supergroups, use the group chat ID, which is often negative or starts with `-100`. If unset, pi-pilot falls back to the first `TELEGRAM_ALLOWED_USERS` entry for personal private-chat setups. If both are empty, proactive notifications are disabled.
+For groups or supergroups, use the group chat ID, which is often negative or starts with `-100`. If unset, pi-pilot falls back to the first `TELEGRAM_ALLOWED_USERS` entry for personal private-chat setups. If both are empty, bot output has no default target and Telegram users are rejected.
 
 ## License
 

@@ -5,6 +5,7 @@ import type {
   ChatCallback,
   ChatMessage,
 } from "../adapters/types.ts";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { logger } from "../logger.ts";
 import { PiRunner, type CompactionEvent, type ToolEvent } from "../pi/runner.ts";
 import { ChatCommands } from "./chat-commands.ts";
@@ -31,7 +32,7 @@ export type ChatRuntimeOptions = {
 export class ChatRuntime {
   private state: ChatState | undefined;
   private initPromise: Promise<void> | undefined;
-  private currentTurnTarget: ChatTarget | undefined;
+  private currentOutput: ReturnType<typeof createTurnStreamSender> | undefined;
   private readonly commands: ChatCommands;
 
   constructor(
@@ -60,21 +61,19 @@ export class ChatRuntime {
       return;
     }
 
-    if (await this.commands.handleMessage(message)) return;
+    const routedMessage = this.routeMessage(message);
+
+    if (await this.commands.handleMessage(routedMessage)) return;
 
     const prompt = formatPrompt(message.text.trim(), message.attachments);
     if (!prompt) return;
 
     const state = await this.getState();
-    state.queue.push(message);
+    state.queue.push(routedMessage);
 
     if (state.busy) {
-      log.info(`[chat ${message.chatId}] queued message`, {
-        messageId: message.messageId,
-        queueLength: state.queue.length,
-      });
-      await this.adapter.sendMessage(message.chatId, "Queued.", {
-        replyToMessageId: message.messageId,
+      await this.adapter.sendMessage(routedMessage.chatId, "Queued.", {
+        replyToMessageId: routedMessage.messageId || undefined,
       });
       return;
     }
@@ -111,7 +110,7 @@ export class ChatRuntime {
     this.state.queue.length = 0;
     this.state.runner.dispose();
     this.state = undefined;
-    this.currentTurnTarget = undefined;
+    this.currentOutput = undefined;
   }
 
   private isAllowedUser(userId: string): boolean {
@@ -119,7 +118,7 @@ export class ChatRuntime {
   }
 
   private resolveNotificationTarget(): ChatTarget | undefined {
-    return this.currentTurnTarget ?? this.defaultNotificationTarget();
+    return this.defaultNotificationTarget();
   }
 
   private defaultNotificationTarget(): ChatTarget | undefined {
@@ -127,14 +126,15 @@ export class ChatRuntime {
     return chatId ? { chatId } : undefined;
   }
 
-  private async withTarget<T>(target: ChatTarget, action: () => Promise<T>): Promise<T> {
-    const previousTarget = this.currentTurnTarget;
-    this.currentTurnTarget = target;
-    try {
-      return await action();
-    } finally {
-      this.currentTurnTarget = previousTarget;
-    }
+  private routeMessage(message: ChatMessage): ChatMessage {
+    const target = this.defaultNotificationTarget();
+    if (!target) return message;
+
+    return {
+      ...message,
+      chatId: target.chatId,
+      messageId: target.chatId === message.chatId ? message.messageId : "",
+    };
   }
 
   private async getState(): Promise<ChatState> {
@@ -152,7 +152,10 @@ export class ChatRuntime {
   private async initializeState(): Promise<void> {
     const runner = new PiRunner(this.config);
     const state = { runner, busy: false, queue: [] };
-    await runner.init();
+
+    runner.setOutputCallback((event) => {
+      void this.handleRunnerOutput(event);
+    });
 
     runner.setCompactionCallback((event) => {
       const target = this.resolveNotificationTarget();
@@ -165,7 +168,44 @@ export class ChatRuntime {
       });
     });
 
+    await runner.init();
     this.state = state;
+  }
+
+  private async handleRunnerOutput(event: AgentSessionEvent): Promise<void> {
+    if (event.type === "agent_start") {
+      this.currentOutput = undefined;
+      return;
+    }
+
+    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+      this.getOrCreateOutput()?.pushText(event.assistantMessageEvent.delta);
+      return;
+    }
+
+    if (event.type === "tool_execution_start") {
+      this.getOrCreateOutput()?.pushToolStart(event);
+      return;
+    }
+
+    if (event.type === "agent_end") {
+      const output = this.currentOutput ?? this.getOrCreateOutput();
+      this.currentOutput = undefined;
+      await output?.finish(extractLastAssistantText(event.messages) || "(no response)");
+    }
+  }
+
+  private getOrCreateOutput(): ReturnType<typeof createTurnStreamSender> | undefined {
+    if (this.currentOutput) return this.currentOutput;
+
+    const target = this.defaultNotificationTarget();
+    if (!target) {
+      log.warn("dropping runner output: no target chat configured");
+      return undefined;
+    }
+
+    this.currentOutput = createTurnStreamSender(this.adapter, target);
+    return this.currentOutput;
   }
 
   private async handleCompactionEvent(chatId: string, event: CompactionEvent): Promise<void> {
@@ -196,67 +236,44 @@ export class ChatRuntime {
       while (state.queue.length) {
         const next = state.queue.shift();
         if (!next) continue;
-        await this.runQueuedMessage(next, state);
+        await this.submitMessage(next, state);
       }
     } finally {
       state.busy = false;
     }
   }
 
-  private async runQueuedMessage(message: ChatMessage, state: ChatState): Promise<void> {
-    await this.withTarget(messageToTarget(message), async () => {
-      const runtimeStatus = await state.runner.getRuntimeStatus();
-      if (runtimeStatus.isCompacting) {
-        await this.adapter.sendMessage(
-          message.chatId,
-          "Compaction is running. Try again after it finishes.",
-          { replyToMessageId: message.messageId },
+  private async submitMessage(message: ChatMessage, state: ChatState): Promise<void> {
+    const typingInterval = setInterval(() => {
+      this.adapter
+        .sendTyping(message.chatId)
+        .catch((error) =>
+          log.warn(`[chat ${message.chatId}] typing failed`, error),
         );
-        return;
-      }
+    }, 4_000);
 
-      const typingInterval = setInterval(() => {
-        this.adapter
-          .sendTyping(message.chatId)
-          .catch((error) =>
-            log.warn(`[chat ${message.chatId}] typing failed`, error),
-          );
-      }, 4_000);
-
-      try {
-        await this.adapter.sendTyping(message.chatId);
-        const response = createTurnStreamSender(this.adapter, message);
-        const startedAt = Date.now();
-        const prompt = formatPrompt(message.text.trim(), message.attachments);
-        const answer = await state.runner.run(prompt, {
-          onTextDelta: (delta) => response.pushText(delta),
-          onToolStart: (event) => response.pushToolStart(event),
-        });
-        await response.finish(answer || "(no response)");
-        log.info(`[chat ${message.chatId}] turn completed`, {
-          durationMs: Date.now() - startedAt,
-          outputLength: answer.length,
-          queueLength: state.queue.length,
-        });
-      } catch (error) {
-        log.error(`[chat ${message.chatId}] pi failed`, error);
-        await this.adapter.sendMessage(
-          message.chatId,
-          `Pi failed: ${error instanceof Error ? error.message : String(error)}`,
-          undefined,
-        );
-      } finally {
-        clearInterval(typingInterval);
-      }
-    });
+    try {
+      await this.adapter.sendTyping(message.chatId);
+      const startedAt = Date.now();
+      const prompt = formatPrompt(message.text.trim(), message.attachments);
+      await state.runner.run(prompt);
+      log.info(`[chat ${message.chatId}] message submitted`, {
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      log.error(`[chat ${message.chatId}] pi failed`, error);
+      await this.adapter.sendMessage(
+        message.chatId,
+        `Pi failed: ${error instanceof Error ? error.message : String(error)}`,
+        undefined,
+      );
+    } finally {
+      clearInterval(typingInterval);
+    }
   }
 }
 
-function messageToTarget(message: ChatMessage): ChatTarget {
-  return { chatId: message.chatId, replyToMessageId: message.messageId };
-}
-
-function createTurnStreamSender(adapter: ChatAdapter, message: ChatMessage) {
+function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {
   let text = "";
   let stream: Awaited<ReturnType<ChatAdapter["startTextStream"]>>;
   let streamStarted = false;
@@ -268,13 +285,16 @@ function createTurnStreamSender(adapter: ChatAdapter, message: ChatMessage) {
   const startStream = async () => {
     if (streamStarted) return stream;
     streamStarted = true;
-    stream = await adapter.startTextStream(message.chatId, { render: "markdown" });
+    stream = await adapter.startTextStream(target.chatId, {
+      render: "markdown",
+      replyToMessageId: target.replyToMessageId,
+    });
     return stream;
   };
 
   const queue = (task: () => Promise<void>) => {
     pending = pending.then(task).catch((error) => {
-      log.warn(`[chat ${message.chatId}] response stream failed`, error);
+      log.warn(`[chat ${target.chatId}] response stream failed`, error);
     });
     return pending;
   };
@@ -323,9 +343,42 @@ function createTurnStreamSender(adapter: ChatAdapter, message: ChatMessage) {
         await activeStream.finish(finalText);
         return;
       }
-      await adapter.sendMessage(message.chatId, finalText, { render: "markdown" });
+      await adapter.sendMessage(target.chatId, finalText, {
+        render: "markdown",
+        replyToMessageId: target.replyToMessageId,
+      });
     },
   };
+}
+
+function extractLastAssistantText(messages: unknown[]): string {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (!message || typeof message !== "object") continue;
+    const record = message as Record<string, unknown>;
+    if (record.role !== "assistant") continue;
+    const text = contentToText(record.content).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function contentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+
+  return content
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      const record = part as Record<string, unknown>;
+      return record.type === "text" ? stringValue(record.text) : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function formatPrompt(text: string, attachments?: ChatAttachment[]): string {

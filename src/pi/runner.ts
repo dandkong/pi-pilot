@@ -6,7 +6,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { CompactionResult } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent, CompactionResult } from "@earendil-works/pi-coding-agent";
 import type { RuntimeConfig } from "../config/runtime.ts";
 import { logger } from "../logger.ts";
 
@@ -38,10 +38,7 @@ export type CompactionEvent = {
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
-export type RunOptions = {
-  onTextDelta?: (delta: string) => void;
-  onToolStart?: (event: ToolEvent) => void | Promise<void>;
-};
+export type RunnerOutputCallback = (event: AgentSessionEvent) => void;
 
 export type CompactionCallback = (event: CompactionEvent) => void;
 
@@ -67,6 +64,7 @@ export type RunnerStatus = {
   thinkingLevel: string;
   isStreaming: boolean;
   isCompacting: boolean;
+  pendingMessages: number;
   context?: {
     tokens: number | null;
     contextWindow: number;
@@ -82,11 +80,13 @@ export type RunnerStatus = {
   };
   activeTools: string[];
   skillCount: number;
+  extensionCount: number;
 };
 
 export type RuntimeStatus = {
   isStreaming: boolean;
   isCompacting: boolean;
+  pendingMessages: number;
 };
 
 export type RecentMessage = {
@@ -104,6 +104,7 @@ class Workspace {
   private settingsManager: SettingsManager | undefined;
   private initPromise: Promise<void> | undefined;
   private compactionCallback: CompactionCallback | undefined;
+  private outputCallback: RunnerOutputCallback | undefined;
   private unsubscribeSession: (() => void) | undefined;
 
   constructor(
@@ -114,6 +115,10 @@ class Workspace {
 
   setCompactionCallback(callback: CompactionCallback): void {
     this.compactionCallback = callback;
+  }
+
+  setOutputCallback(callback: RunnerOutputCallback): void {
+    this.outputCallback = callback;
   }
 
   async init(): Promise<void> {
@@ -128,21 +133,9 @@ class Workspace {
     }
   }
 
-  async run(prompt: string, options?: RunOptions): Promise<string> {
+  async run(prompt: string): Promise<void> {
     const session = await this.getSession();
-    let answer = "";
-    let callbackQueue = Promise.resolve();
-
-    const runCallback = (callback: () => void | Promise<void>) => {
-      try {
-        const result = callback();
-        callbackQueue = callbackQueue.then(() => result).catch((error) => {
-          log.warn("run event callback failed", error);
-        });
-      } catch (error) {
-        log.warn("run event callback failed", error);
-      }
-    };
+    const startedAt = Date.now();
 
     log.info("prompt start", {
       sessionId: session.sessionId,
@@ -150,32 +143,12 @@ class Workspace {
       text: prompt,
     });
 
-    const unsubscribe = session.subscribe((event) => {
-      if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-        answer += event.assistantMessageEvent.delta;
-        options?.onTextDelta?.(event.assistantMessageEvent.delta);
-        return;
-      }
-      if (event.type === "tool_execution_start") {
-        runCallback(() => options?.onToolStart?.(event));
-      }
-      logAgentEvent(event);
-    });
+    await session.prompt(prompt, { source: "rpc" });
 
-    const startedAt = Date.now();
-    try {
-      await session.prompt(prompt, { source: "rpc" });
-      await callbackQueue;
-      const finalAnswer = answer.trim();
-      log.info("prompt end", {
-        sessionId: session.sessionId,
-        durationMs: Date.now() - startedAt,
-        text: finalAnswer,
-      });
-      return finalAnswer;
-    } finally {
-      unsubscribe();
-    }
+    log.info("prompt end", {
+      sessionId: session.sessionId,
+      durationMs: Date.now() - startedAt,
+    });
   }
 
   async getStatus(): Promise<RunnerStatus> {
@@ -188,6 +161,7 @@ class Workspace {
       thinkingLevel: session.thinkingLevel,
       isStreaming: session.isStreaming,
       isCompacting: session.isCompacting,
+      pendingMessages: session.pendingMessageCount,
       context: session.getContextUsage(),
       stats: {
         userMessages: stats.userMessages,
@@ -199,6 +173,7 @@ class Workspace {
       },
       activeTools: session.getActiveToolNames(),
       skillCount: session.resourceLoader.getSkills().skills.length,
+      extensionCount: session.resourceLoader.getExtensions().extensions.length,
     };
   }
 
@@ -207,6 +182,7 @@ class Workspace {
     return {
       isStreaming: session.isStreaming,
       isCompacting: session.isCompacting,
+      pendingMessages: session.pendingMessageCount,
     };
   }
 
@@ -318,6 +294,8 @@ class Workspace {
     // Subscribe once for host-level notifications that are not tied to a run callback.
     this.unsubscribeSession?.();
     this.unsubscribeSession = session.subscribe((event) => {
+      this.outputCallback?.(event);
+
       if (event.type === "compaction_start") {
         log.info("compaction_start", event);
         this.compactionCallback?.({ type: "compaction_start", reason: event.reason });
@@ -332,16 +310,20 @@ class Workspace {
           errorMessage: event.errorMessage,
         });
       }
+
+      logAgentEvent(event);
     });
 
     const skills = session.resourceLoader.getSkills().skills;
+    const extensions = session.resourceLoader.getExtensions().extensions;
     log.info("session initialized", {
       cwd: this.cwd,
       sessionId: session.sessionId,
       model: session.model ? `${session.model.provider}/${session.model.name}` : undefined,
       thinkingLevel: session.thinkingLevel,
-      activeTools: session.getActiveToolNames(),
-      skills: skills.map((skill) => skill.name),
+      activeTools: formatList(session.getActiveToolNames()),
+      extensions: formatList(extensions.map((extension) => extension.path)),
+      skills: formatList(skills.map((skill) => skill.name)),
     });
   }
 
@@ -364,6 +346,7 @@ export class PiRunner {
   private workspace: Workspace | undefined;
   private currentCwd: string;
   private compactionCallback: CompactionCallback | undefined;
+  private outputCallback: RunnerOutputCallback | undefined;
 
   constructor(private readonly config: RuntimeConfig) {
     this.currentCwd = config.workspaces[0] ?? process.cwd();
@@ -378,8 +361,13 @@ export class PiRunner {
     this.getWorkspace().setCompactionCallback(callback);
   }
 
-  async run(prompt: string, options?: RunOptions): Promise<string> {
-    return this.getWorkspace().run(prompt, options);
+  setOutputCallback(callback: RunnerOutputCallback): void {
+    this.outputCallback = callback;
+    this.getWorkspace().setOutputCallback(callback);
+  }
+
+  async run(prompt: string): Promise<void> {
+    return this.getWorkspace().run(prompt);
   }
 
   async getStatus(): Promise<RunnerStatus> {
@@ -488,6 +476,7 @@ export class PiRunner {
 
       this.workspace = new Workspace(this.currentCwd, this.authStorage, this.modelRegistry);
       if (this.compactionCallback) this.workspace.setCompactionCallback(this.compactionCallback);
+      if (this.outputCallback) this.workspace.setOutputCallback(this.outputCallback);
     }
     return this.workspace;
   }
@@ -496,6 +485,10 @@ export class PiRunner {
     if (!this.modelRegistry) throw new Error("Pi model registry was not initialized");
     return this.modelRegistry;
   }
+}
+
+function formatList(items: string[]): string {
+  return items.length ? items.join(", ") : "(none)";
 }
 
 function toRecentMessage(message: unknown): RecentMessage | undefined {
