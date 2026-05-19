@@ -210,7 +210,7 @@ export class ChatCommands {
     await activity.state.runner.abort();
     await this.adapter.sendMessage(
       chatId,
-      `Task aborted. Cleared ${activity.queued} queued message${activity.queued === 1 ? "" : "s"}.`,
+      "Task aborted.",
       { replyToMessageId },
     );
   }
@@ -390,7 +390,7 @@ export class ChatCommands {
     const state = await this.getState();
     await this.adapter.sendMessage(
       chatId,
-      formatStatus(await state.runner.getStatus(), state.busy, state.queue.length),
+      formatStatus(await state.runner.getStatus(), state.queue.length),
       {
         replyToMessageId,
       },
@@ -463,7 +463,7 @@ export class ChatCommands {
     const runtimeStatus = await state.runner.getRuntimeStatus();
     return {
       state,
-      busy: state.busy,
+      busy: state.processingQueue,
       streaming: runtimeStatus.isStreaming,
       compacting: runtimeStatus.isCompacting,
       queued: state.queue.length + runtimeStatus.pendingMessages,

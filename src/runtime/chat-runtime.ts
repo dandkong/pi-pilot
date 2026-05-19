@@ -14,7 +14,7 @@ const log = logger.child("runtime");
 
 export type ChatState = {
   runner: PiRunner;
-  busy: boolean;
+  processingQueue: boolean;
   queue: ChatMessage[];
 };
 
@@ -72,7 +72,7 @@ export class ChatRuntime {
     const state = await this.getState();
     state.queue.push(routedMessage);
 
-    if (state.busy) {
+    if (await this.isBusy(state)) {
       await this.adapter.sendMessage(routedMessage.chatId, "Queued.", {
         replyToMessageId: routedMessage.messageId || undefined,
       });
@@ -148,7 +148,7 @@ export class ChatRuntime {
 
   private async initializeState(): Promise<void> {
     const runner = new PiRunner(this.config);
-    const state = { runner, busy: false, queue: [] };
+    const state = { runner, processingQueue: false, queue: [] };
 
     runner.setOutputCallback((event) => {
       this.outputQueue = this.outputQueue
@@ -168,6 +168,7 @@ export class ChatRuntime {
 
     if (event.type === "compaction_end") {
       await this.sendCompactionEnd(event);
+      if (!event.willRetry) await this.processQueueIfIdle();
       return;
     }
 
@@ -190,6 +191,7 @@ export class ChatRuntime {
       const output = this.currentOutput ?? this.getOrCreateOutput();
       this.currentOutput = undefined;
       await output?.finish(extractLastAssistantText(event.messages) || "(no response)");
+      await this.processQueueIfIdle();
     }
   }
 
@@ -235,18 +237,35 @@ export class ChatRuntime {
     await this.adapter.sendMessage(target.chatId, "✅ Context compacted.");
   }
 
+  private async isBusy(state: ChatState): Promise<boolean> {
+    return state.processingQueue || await this.isRunnerBusy(state);
+  }
+
+  private async isRunnerBusy(state: ChatState): Promise<boolean> {
+    const status = await state.runner.getRuntimeStatus();
+    return status.isStreaming || status.isCompacting || status.pendingMessages > 0;
+  }
+
+  private async processQueueIfIdle(): Promise<void> {
+    const state = this.state;
+    if (!state || !state.queue.length || await this.isBusy(state)) return;
+    await this.processQueue(state);
+  }
+
   private async processQueue(state: ChatState): Promise<void> {
-    if (state.busy) return;
-    state.busy = true;
+    if (state.processingQueue) return;
+    state.processingQueue = true;
 
     try {
       while (state.queue.length) {
+        if (await this.isRunnerBusy(state)) break;
+
         const next = state.queue.shift();
         if (!next) continue;
         await this.submitMessage(next, state);
       }
     } finally {
-      state.busy = false;
+      state.processingQueue = false;
     }
   }
 

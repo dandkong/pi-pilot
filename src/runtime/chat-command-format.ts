@@ -11,7 +11,7 @@ export function formatHelp(commands: ChatCommand[]): string {
   ].join("\n");
 }
 
-export function formatStatus(status: RunnerStatus, busy: boolean, queuedMessages: number): string {
+export function formatStatus(status: RunnerStatus, queuedMessages: number): string {
   const model = status.model
     ? formatModelLine(
         status.model.provider,
@@ -35,7 +35,6 @@ export function formatStatus(status: RunnerStatus, busy: boolean, queuedMessages
     `Context: ${context}`,
     `Workspace: ${status.cwd}`,
     `Session: ${session}`,
-    `Busy: ${busy || status.isStreaming ? "yes" : "no"}`,
     `Streaming: ${status.isStreaming ? "yes" : "no"}`,
     `Compacting: ${status.isCompacting ? "yes" : "no"}`,
     `Queue: ${queuedMessages + status.pendingMessages}`,
