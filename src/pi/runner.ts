@@ -6,7 +6,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentSessionEvent, CompactionResult } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { RuntimeConfig } from "../config/runtime.ts";
 import { logger } from "../logger.ts";
 
@@ -28,19 +28,9 @@ export type ToolEvent = {
   isError?: unknown;
 };
 
-export type CompactionEvent = {
-  type: "compaction_start" | "compaction_end";
-  reason: "manual" | "threshold" | "overflow";
-  result?: CompactionResult;
-  aborted?: boolean;
-  errorMessage?: string;
-};
-
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export type RunnerOutputCallback = (event: AgentSessionEvent) => void;
-
-export type CompactionCallback = (event: CompactionEvent) => void;
 
 export type SessionListItem = {
   id: string;
@@ -103,7 +93,6 @@ class Workspace {
   private session: AgentSession | undefined;
   private settingsManager: SettingsManager | undefined;
   private initPromise: Promise<void> | undefined;
-  private compactionCallback: CompactionCallback | undefined;
   private outputCallback: RunnerOutputCallback | undefined;
   private unsubscribeSession: (() => void) | undefined;
 
@@ -112,10 +101,6 @@ class Workspace {
     private readonly authStorage: AuthStorage,
     private readonly modelRegistry: ModelRegistry,
   ) {}
-
-  setCompactionCallback(callback: CompactionCallback): void {
-    this.compactionCallback = callback;
-  }
 
   setOutputCallback(callback: RunnerOutputCallback): void {
     this.outputCallback = callback;
@@ -296,21 +281,6 @@ class Workspace {
     this.unsubscribeSession = session.subscribe((event) => {
       this.outputCallback?.(event);
 
-      if (event.type === "compaction_start") {
-        log.info("compaction_start", event);
-        this.compactionCallback?.({ type: "compaction_start", reason: event.reason });
-      }
-      if (event.type === "compaction_end") {
-        log.info("compaction_end", event);
-        this.compactionCallback?.({
-          type: "compaction_end",
-          reason: event.reason,
-          result: event.result ?? undefined,
-          aborted: event.aborted,
-          errorMessage: event.errorMessage,
-        });
-      }
-
       logAgentEvent(event);
     });
 
@@ -345,7 +315,6 @@ export class PiRunner {
   private modelRegistry: ModelRegistry | undefined;
   private workspace: Workspace | undefined;
   private currentCwd: string;
-  private compactionCallback: CompactionCallback | undefined;
   private outputCallback: RunnerOutputCallback | undefined;
 
   constructor(private readonly config: RuntimeConfig) {
@@ -354,11 +323,6 @@ export class PiRunner {
 
   async init(): Promise<void> {
     await this.getWorkspace().init();
-  }
-
-  setCompactionCallback(callback: CompactionCallback): void {
-    this.compactionCallback = callback;
-    this.getWorkspace().setCompactionCallback(callback);
   }
 
   setOutputCallback(callback: RunnerOutputCallback): void {
@@ -475,7 +439,6 @@ export class PiRunner {
       this.modelRegistry = this.modelRegistry ?? ModelRegistry.create(this.authStorage);
 
       this.workspace = new Workspace(this.currentCwd, this.authStorage, this.modelRegistry);
-      if (this.compactionCallback) this.workspace.setCompactionCallback(this.compactionCallback);
       if (this.outputCallback) this.workspace.setOutputCallback(this.outputCallback);
     }
     return this.workspace;

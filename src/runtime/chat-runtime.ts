@@ -7,7 +7,7 @@ import type {
 } from "../adapters/types.ts";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { logger } from "../logger.ts";
-import { PiRunner, type CompactionEvent, type ToolEvent } from "../pi/runner.ts";
+import { PiRunner, type ToolEvent } from "../pi/runner.ts";
 import { ChatCommands } from "./chat-commands.ts";
 
 const log = logger.child("runtime");
@@ -33,6 +33,7 @@ export class ChatRuntime {
   private state: ChatState | undefined;
   private initPromise: Promise<void> | undefined;
   private currentOutput: ReturnType<typeof createTurnStreamSender> | undefined;
+  private outputQueue = Promise.resolve();
   private readonly commands: ChatCommands;
 
   constructor(
@@ -117,10 +118,6 @@ export class ChatRuntime {
     return this.config.allowedActorIds.includes(userId);
   }
 
-  private resolveNotificationTarget(): ChatTarget | undefined {
-    return this.defaultNotificationTarget();
-  }
-
   private defaultNotificationTarget(): ChatTarget | undefined {
     const chatId = this.config.defaultTargetId ?? this.config.allowedActorIds[0];
     return chatId ? { chatId } : undefined;
@@ -154,18 +151,9 @@ export class ChatRuntime {
     const state = { runner, busy: false, queue: [] };
 
     runner.setOutputCallback((event) => {
-      void this.handleRunnerOutput(event);
-    });
-
-    runner.setCompactionCallback((event) => {
-      const target = this.resolveNotificationTarget();
-      if (!target) {
-        log.warn("dropping compaction notification: no target chat configured");
-        return;
-      }
-      this.handleCompactionEvent(target.chatId, event).catch((error) => {
-        log.error(`[chat ${target.chatId}] compaction notification failed`, error);
-      });
+      this.outputQueue = this.outputQueue
+        .then(() => this.handleRunnerOutput(event))
+        .catch((error) => log.error("runner output handling failed", error));
     });
 
     await runner.init();
@@ -173,6 +161,16 @@ export class ChatRuntime {
   }
 
   private async handleRunnerOutput(event: AgentSessionEvent): Promise<void> {
+    if (event.type === "compaction_start") {
+      await this.sendCompactionStart(event.reason);
+      return;
+    }
+
+    if (event.type === "compaction_end") {
+      await this.sendCompactionEnd(event);
+      return;
+    }
+
     if (event.type === "agent_start") {
       this.currentOutput = undefined;
       return;
@@ -208,24 +206,33 @@ export class ChatRuntime {
     return this.currentOutput;
   }
 
-  private async handleCompactionEvent(chatId: string, event: CompactionEvent): Promise<void> {
-    if (event.type === "compaction_start") {
-      const reason = event.reason === "manual" ? "manual" : event.reason === "threshold" ? "threshold reached" : "context overflow";
-      await this.adapter.sendMessage(chatId, `🔄 Compacting context (${reason})...`);
+  private async sendCompactionStart(reason: "manual" | "threshold" | "overflow"): Promise<void> {
+    const target = this.defaultNotificationTarget();
+    if (!target) {
+      log.warn("dropping compaction notification: no target chat configured");
       return;
     }
 
-    if (event.type === "compaction_end") {
-      if (event.aborted) {
-        await this.adapter.sendMessage(chatId, "⚠️ Compaction aborted.");
-        return;
-      }
-      if (event.errorMessage) {
-        await this.adapter.sendMessage(chatId, `❌ Compaction failed: ${event.errorMessage}`);
-        return;
-      }
-      await this.adapter.sendMessage(chatId, "✅ Context compacted.");
+    const label = reason === "manual" ? "manual" : reason === "threshold" ? "threshold reached" : "context overflow";
+    await this.adapter.sendMessage(target.chatId, `🔄 Compacting context (${label})...`);
+  }
+
+  private async sendCompactionEnd(event: Extract<AgentSessionEvent, { type: "compaction_end" }>): Promise<void> {
+    const target = this.defaultNotificationTarget();
+    if (!target) {
+      log.warn("dropping compaction notification: no target chat configured");
+      return;
     }
+
+    if (event.aborted) {
+      await this.adapter.sendMessage(target.chatId, "⚠️ Compaction aborted.");
+      return;
+    }
+    if (event.errorMessage) {
+      await this.adapter.sendMessage(target.chatId, `❌ Compaction failed: ${event.errorMessage}`);
+      return;
+    }
+    await this.adapter.sendMessage(target.chatId, "✅ Context compacted.");
   }
 
   private async processQueue(state: ChatState): Promise<void> {
