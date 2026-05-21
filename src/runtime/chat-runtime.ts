@@ -300,6 +300,24 @@ export class ChatRuntime {
 }
 
 function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {
+  const toolOutput = createTextStreamSender(adapter, target);
+  const answerOutput = createTextStreamSender(adapter, target);
+
+  return {
+    pushText(delta: string) {
+      answerOutput.append(delta);
+    },
+    pushToolStart(event: ToolEvent) {
+      toolOutput.append(`${formatToolStart(event)}\n`, { immediate: true });
+    },
+    async finish(fallbackText: string) {
+      await toolOutput.finish();
+      await answerOutput.finish(fallbackText);
+    },
+  };
+}
+
+function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget) {
   let text = "";
   let stream: Awaited<ReturnType<ChatAdapter["startTextStream"]>>;
   let streamStarted = false;
@@ -348,22 +366,22 @@ function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {
   };
 
   return {
-    pushText(delta: string) {
+    append(delta: string, options: { immediate?: boolean } = {}) {
       text += delta;
+      if (options.immediate) {
+        update();
+        return;
+      }
       scheduleUpdate();
     },
-    pushToolStart(event: ToolEvent) {
-      const separator = text.trim() ? "\n" : "";
-      text = `${text.trimEnd()}${separator}${formatToolStart(event)}\n`;
-      update();
-    },
-    async finish(fallbackText: string) {
+    async finish(fallbackText = "") {
       if (scheduled) {
         clearTimeout(scheduled);
         scheduled = undefined;
       }
       await pending;
-      const finalText = text.trim() || fallbackText;
+      const finalText = text.trim() || fallbackText.trim();
+      if (!finalText) return;
       const activeStream = await startStream();
       if (activeStream) {
         await activeStream.finish(finalText);
