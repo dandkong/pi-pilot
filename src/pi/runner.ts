@@ -120,20 +120,7 @@ class Workspace {
 
   async run(prompt: string): Promise<void> {
     const session = await this.getSession();
-    const startedAt = Date.now();
-
-    log.info("prompt start", {
-      sessionId: session.sessionId,
-      model: session.model ? `${session.model.provider}/${session.model.name}` : undefined,
-      text: prompt,
-    });
-
     await session.prompt(prompt, { source: "rpc" });
-
-    log.info("prompt end", {
-      sessionId: session.sessionId,
-      durationMs: Date.now() - startedAt,
-    });
   }
 
   async getStatus(): Promise<RunnerStatus> {
@@ -257,17 +244,13 @@ class Workspace {
       sessionManager = SessionManager.continueRecent(this.cwd);
     }
 
-    const { session, modelFallbackMessage } = await createAgentSession({
+    const { session } = await createAgentSession({
       cwd: this.cwd,
       authStorage: this.authStorage,
       modelRegistry: this.modelRegistry,
       settingsManager,
       sessionManager,
     });
-
-    if (modelFallbackMessage) {
-      log.warn("model fallback", modelFallbackMessage);
-    }
 
     this.settingsManager = settingsManager;
     this.session = session;

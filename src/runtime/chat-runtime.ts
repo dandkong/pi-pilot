@@ -69,17 +69,7 @@ export class ChatRuntime {
     const prompt = formatPrompt(message.text.trim(), message.attachments);
     if (!prompt) return;
 
-    const state = await this.getState();
-    state.queue.push(routedMessage);
-
-    if (await this.isBusy(state)) {
-      await this.adapter.sendMessage(routedMessage.chatId, "Queued.", {
-        replyToMessageId: routedMessage.messageId || undefined,
-      });
-      return;
-    }
-
-    await this.processQueue(state);
+    await this.enqueueMessage(routedMessage);
   }
 
   async handleCallback(callback: ChatCallback): Promise<void> {
@@ -161,71 +151,60 @@ export class ChatRuntime {
   }
 
   private async handleRunnerOutput(event: AgentSessionEvent): Promise<void> {
-    if (event.type === "compaction_start") {
-      await this.sendCompactionStart(event.reason);
-      return;
+    switch (event.type) {
+      case "compaction_start": {
+        const target = this.getNotificationTarget("compaction notification");
+        if (target) await this.sendCompactionStart(target, event.reason);
+        return;
+      }
+      case "compaction_end": {
+        const target = this.getNotificationTarget("compaction notification");
+        if (target) await this.sendCompactionEnd(target, event);
+        if (!event.willRetry) await this.drainQueueIfIdle();
+        return;
+      }
+      case "agent_start":
+        this.currentOutput = undefined;
+        return;
+      case "message_update":
+        if (event.assistantMessageEvent.type === "text_delta") {
+          await this.getOrCreateOutput()?.pushText(event.assistantMessageEvent.delta);
+        }
+        return;
+      case "tool_execution_start":
+        await this.getOrCreateOutput()?.pushToolStart(event);
+        return;
+      case "agent_end": {
+        const output = this.currentOutput ?? this.getOrCreateOutput();
+        this.currentOutput = undefined;
+        await output?.finish(extractLastAssistantText(event.messages) || "(no response)");
+        await this.drainQueueIfIdle();
+      }
     }
+  }
 
-    if (event.type === "compaction_end") {
-      await this.sendCompactionEnd(event);
-      if (!event.willRetry) await this.processQueueIfIdle();
-      return;
-    }
-
-    if (event.type === "agent_start") {
-      this.currentOutput = undefined;
-      return;
-    }
-
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      this.getOrCreateOutput()?.pushText(event.assistantMessageEvent.delta);
-      return;
-    }
-
-    if (event.type === "tool_execution_start") {
-      this.getOrCreateOutput()?.pushToolStart(event);
-      return;
-    }
-
-    if (event.type === "agent_end") {
-      const output = this.currentOutput ?? this.getOrCreateOutput();
-      this.currentOutput = undefined;
-      await output?.finish(extractLastAssistantText(event.messages) || "(no response)");
-      await this.processQueueIfIdle();
-    }
+  private getNotificationTarget(kind: string): ChatTarget | undefined {
+    const target = this.defaultNotificationTarget();
+    if (!target) log.warn(`dropping ${kind}: no target chat configured`);
+    return target;
   }
 
   private getOrCreateOutput(): ReturnType<typeof createTurnStreamSender> | undefined {
     if (this.currentOutput) return this.currentOutput;
 
-    const target = this.defaultNotificationTarget();
-    if (!target) {
-      log.warn("dropping runner output: no target chat configured");
-      return undefined;
-    }
+    const target = this.getNotificationTarget("runner output");
+    if (!target) return undefined;
 
     this.currentOutput = createTurnStreamSender(this.adapter, target);
     return this.currentOutput;
   }
 
-  private async sendCompactionStart(reason: "manual" | "threshold" | "overflow"): Promise<void> {
-    const target = this.defaultNotificationTarget();
-    if (!target) {
-      log.warn("dropping compaction notification: no target chat configured");
-      return;
-    }
-
+  private async sendCompactionStart(target: ChatTarget, reason: "manual" | "threshold" | "overflow"): Promise<void> {
     const label = reason === "manual" ? "manual" : reason === "threshold" ? "threshold reached" : "context overflow";
     await this.adapter.sendMessage(target.chatId, `🔄 Compacting context (${label})...`);
   }
 
-  private async sendCompactionEnd(event: Extract<AgentSessionEvent, { type: "compaction_end" }>): Promise<void> {
-    const target = this.defaultNotificationTarget();
-    if (!target) {
-      log.warn("dropping compaction notification: no target chat configured");
-      return;
-    }
-
+  private async sendCompactionEnd(target: ChatTarget, event: Extract<AgentSessionEvent, { type: "compaction_end" }>): Promise<void> {
     if (event.aborted) {
       await this.adapter.sendMessage(target.chatId, "⚠️ Compaction aborted.");
       return;
@@ -237,8 +216,24 @@ export class ChatRuntime {
     await this.adapter.sendMessage(target.chatId, "✅ Context compacted.");
   }
 
-  private async isBusy(state: ChatState): Promise<boolean> {
-    return state.processingQueue || await this.isRunnerBusy(state);
+  private async enqueueMessage(message: ChatMessage): Promise<void> {
+    const state = await this.getState();
+    const shouldQueue = state.processingQueue || state.queue.length > 0 || await this.isRunnerBusy(state);
+
+    state.queue.push(message);
+
+    if (shouldQueue) {
+      await this.sendQueued(message);
+      return;
+    }
+
+    await this.drainQueue(state);
+  }
+
+  private async sendQueued(message: ChatMessage): Promise<void> {
+    await this.adapter.sendMessage(message.chatId, "Queued.", {
+      replyToMessageId: message.messageId || undefined,
+    });
   }
 
   private async isRunnerBusy(state: ChatState): Promise<boolean> {
@@ -246,14 +241,13 @@ export class ChatRuntime {
     return status.isStreaming || status.isCompacting || status.pendingMessages > 0;
   }
 
-  private async processQueueIfIdle(): Promise<void> {
+  private async drainQueueIfIdle(): Promise<void> {
     const state = this.state;
-    if (!state || !state.queue.length || await this.isBusy(state)) return;
-    await this.processQueue(state);
+    if (state) await this.drainQueue(state);
   }
 
-  private async processQueue(state: ChatState): Promise<void> {
-    if (state.processingQueue) return;
+  private async drainQueue(state: ChatState): Promise<void> {
+    if (state.processingQueue || !state.queue.length) return;
     state.processingQueue = true;
 
     try {
@@ -280,12 +274,8 @@ export class ChatRuntime {
 
     try {
       await this.adapter.sendTyping(message.chatId);
-      const startedAt = Date.now();
       const prompt = formatPrompt(message.text.trim(), message.attachments);
       await state.runner.run(prompt);
-      log.info(`[chat ${message.chatId}] message submitted`, {
-        durationMs: Date.now() - startedAt,
-      });
     } catch (error) {
       log.error(`[chat ${message.chatId}] pi failed`, error);
       await this.adapter.sendMessage(
@@ -300,19 +290,47 @@ export class ChatRuntime {
 }
 
 function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {
-  const toolOutput = createTextStreamSender(adapter, target);
-  const answerOutput = createTextStreamSender(adapter, target);
+  type SegmentKind = "text" | "tool";
+
+  let currentOutput: ReturnType<typeof createTextStreamSender> | undefined;
+  let currentKind: SegmentKind | undefined;
+  let hasSentSegment = false;
+  let pending = Promise.resolve();
+
+  const switchTo = async (kind: SegmentKind) => {
+    if (currentKind === kind && currentOutput) return currentOutput;
+
+    if (currentOutput && await currentOutput.finish()) {
+      hasSentSegment = true;
+    }
+
+    currentKind = kind;
+    currentOutput = createTextStreamSender(adapter, target);
+    return currentOutput;
+  };
+
+  const queue = (task: () => Promise<void>) => {
+    pending = enqueueStreamTask(pending, task, `[chat ${target.chatId}] turn stream failed`);
+    return pending;
+  };
 
   return {
     pushText(delta: string) {
-      answerOutput.append(delta);
+      return queue(async () => {
+        const output = await switchTo("text");
+        output.append(delta);
+      });
     },
     pushToolStart(event: ToolEvent) {
-      toolOutput.append(`${formatToolStart(event)}\n`, { immediate: true });
+      return queue(async () => {
+        const output = await switchTo("tool");
+        output.append(`${formatToolStart(event)}\n`, { immediate: true });
+      });
     },
     async finish(fallbackText: string) {
-      await toolOutput.finish();
-      await answerOutput.finish(fallbackText);
+      await pending;
+      const sentCurrent = await currentOutput?.finish(hasSentSegment ? "" : fallbackText);
+      hasSentSegment = hasSentSegment || !!sentCurrent;
     },
   };
 }
@@ -337,9 +355,7 @@ function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget) {
   };
 
   const queue = (task: () => Promise<void>) => {
-    pending = pending.then(task).catch((error) => {
-      log.warn(`[chat ${target.chatId}] response stream failed`, error);
-    });
+    pending = enqueueStreamTask(pending, task, `[chat ${target.chatId}] response stream failed`);
     return pending;
   };
 
@@ -374,25 +390,36 @@ function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget) {
       }
       scheduleUpdate();
     },
-    async finish(fallbackText = "") {
+    async finish(fallbackText = ""): Promise<boolean> {
       if (scheduled) {
         clearTimeout(scheduled);
         scheduled = undefined;
       }
       await pending;
       const finalText = text.trim() || fallbackText.trim();
-      if (!finalText) return;
+      if (!finalText) return false;
       const activeStream = await startStream();
       if (activeStream) {
         await activeStream.finish(finalText);
-        return;
+        return true;
       }
       await adapter.sendMessage(target.chatId, finalText, {
         render: "markdown",
         replyToMessageId: target.replyToMessageId,
       });
+      return true;
     },
   };
+}
+
+function enqueueStreamTask(
+  pending: Promise<void>,
+  task: () => Promise<void>,
+  errorMessage: string,
+): Promise<void> {
+  return pending.then(task).catch((error) => {
+    log.warn(errorMessage, error);
+  });
 }
 
 function extractLastAssistantText(messages: unknown[]): string {
