@@ -238,7 +238,7 @@ class Workspace {
   }
 
   private async createSession(sessionManager?: SessionManager): Promise<void> {
-    const settingsManager = this.settingsManager ?? SettingsManager.create(this.cwd);
+    const settingsManager = this.settingsManager ?? createTrustedSettingsManager(this.cwd);
 
     if (!sessionManager) {
       sessionManager = SessionManager.continueRecent(this.cwd);
@@ -431,6 +431,12 @@ export class PiRunner {
     if (!this.modelRegistry) throw new Error("Pi model registry was not initialized");
     return this.modelRegistry;
   }
+}
+
+function createTrustedSettingsManager(cwd: string): SettingsManager {
+  // Pi Pilot is a remote SDK UI for user-configured workspaces. Treat them as
+  // trusted so project-local .pi settings/resources load without a TUI prompt.
+  return SettingsManager.create(cwd, undefined, { projectTrusted: true });
 }
 
 function formatList(items: string[]): string {
