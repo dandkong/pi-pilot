@@ -1,3 +1,4 @@
+import remend from "remend";
 import { Bot, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import type { Context } from "grammy";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -5,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { logger } from "../logger.ts";
 import { chunkText } from "../render/chunking.ts";
-import { renderTelegramHtml } from "../render/telegram-html.ts";
 import type {
   ChatAttachment,
   ChatAdapter,
@@ -20,19 +20,13 @@ import type {
 } from "./types.ts";
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
-const TELEGRAM_MARKDOWN_CHUNK_LIMIT = 3200;
+const TELEGRAM_RICH_MARKDOWN_CHUNK_LIMIT = 30_000;
 const MEDIA_GROUP_FLUSH_MS = 1_000;
 const log = logger.child("telegram");
 
 type MediaGroupState = {
   messages: ChatMessage[];
   timer: Timer;
-};
-
-type PreparedTelegramMessage = {
-  text: string;
-  parseMode?: "HTML";
-  fallbackText?: string;
 };
 
 export class TelegramAdapter implements ChatAdapter {
@@ -90,11 +84,52 @@ export class TelegramAdapter implements ChatAdapter {
   }
 
   async sendMessage(chatId: string, text: string, options?: SendMessageOptions): Promise<SentMessage[]> {
-    const chunks = prepareTelegramMessages(text || "(no response)", options?.render);
+    const messageText = text || "(no response)";
+    if (options?.render === "markdown") {
+      return this.sendRichMarkdownMessages(chatId, messageText, options);
+    }
+    return this.sendPlainMessages(chatId, messageText, options);
+  }
+
+  private async sendRichMarkdownMessages(
+    chatId: string,
+    text: string,
+    options?: SendMessageOptions,
+  ): Promise<SentMessage[]> {
+    const chunks = chunkText(text, TELEGRAM_RICH_MARKDOWN_CHUNK_LIMIT);
+    const sent: SentMessage[] = [];
+
+    for (const [index, chunk] of chunks.entries()) {
+      const messageOptions = {
+        reply_parameters:
+          index === 0 && options?.replyToMessageId
+            ? { message_id: Number(options.replyToMessageId) }
+            : undefined,
+        reply_markup: index === chunks.length - 1 ? toInlineKeyboard(options?.buttons) : undefined,
+      };
+
+      try {
+        const message = await this.bot.api.sendRichMessage(chatId, { markdown: chunk }, messageOptions);
+        sent.push({ messageId: String(message.message_id) });
+      } catch (error) {
+        log.warn("rich markdown send failed, retrying as plain text", formatGrammyError(error));
+        const fallback = await this.sendPlainMessages(chatId, chunk, {
+          ...options,
+          replyToMessageId: index === 0 ? options?.replyToMessageId : undefined,
+          buttons: index === chunks.length - 1 ? options?.buttons : undefined,
+        });
+        sent.push(...fallback);
+      }
+    }
+
+    return sent;
+  }
+
+  private async sendPlainMessages(chatId: string, text: string, options?: SendMessageOptions): Promise<SentMessage[]> {
+    const chunks = chunkText(text, TELEGRAM_MESSAGE_LIMIT);
     const sent: SentMessage[] = [];
     for (const [index, chunk] of chunks.entries()) {
       const messageOptions = {
-        parse_mode: chunk.parseMode,
         link_preview_options: { is_disabled: true },
         reply_parameters:
           index === 0 && options?.replyToMessageId
@@ -102,14 +137,7 @@ export class TelegramAdapter implements ChatAdapter {
             : undefined,
         reply_markup: index === chunks.length - 1 ? toInlineKeyboard(options?.buttons) : undefined,
       };
-      const message = await this.bot.api.sendMessage(chatId, chunk.text, messageOptions).catch((error) => {
-        if (!chunk.fallbackText) throw error;
-        log.warn("formatted send failed, retrying as plain text", formatGrammyError(error));
-        return this.bot.api.sendMessage(chatId, chunk.fallbackText, {
-          ...messageOptions,
-          parse_mode: undefined,
-        });
-      });
+      const message = await this.bot.api.sendMessage(chatId, chunk, messageOptions);
       sent.push({ messageId: String(message.message_id) });
     }
     return sent;
@@ -123,31 +151,30 @@ export class TelegramAdapter implements ChatAdapter {
   }
 
   async startTextStream(chatId: string, options?: SendMessageOptions): Promise<ChatTextStream | undefined> {
-    const messages: Array<{ messageId: string; text: string; parseMode?: "HTML" }> = [];
+    if (options?.render === "markdown" && isPrivateChatId(chatId)) {
+      return this.startRichMarkdownStream(chatId, options);
+    }
+
+    const messages: Array<{ messageId: string; text: string }> = [];
 
     const sync = async (text: string, finished = false) => {
-      const chunks = prepareTelegramMessages(text.trim() || (finished ? "(no response)" : ""), options?.render);
-      if (!chunks.length || !chunks[0]?.text.trim()) return;
+      const chunks = chunkText(text.trim() || (finished ? "(no response)" : ""), TELEGRAM_MESSAGE_LIMIT);
+      if (!chunks.length || !chunks[0]?.trim()) return;
 
       for (const [index, chunk] of chunks.entries()) {
         const existing = messages[index];
         if (!existing) {
           const sent = await this.sendStreamMessage(chatId, chunk, index === 0 ? options : undefined);
-          if (sent) messages.push({ messageId: sent.messageId, text: chunk.text, parseMode: chunk.parseMode });
+          if (sent) messages.push({ messageId: sent.messageId, text: chunk });
           continue;
         }
 
         const target = messages[index];
         if (!target) continue;
-        if (target.text === chunk.text && target.parseMode === chunk.parseMode) continue;
+        if (target.text === chunk) continue;
 
-        await this.editStreamMessage(chatId, target.messageId, chunk.text, chunk.parseMode).catch((error) => {
-          if (!chunk.fallbackText) throw error;
-          log.warn("formatted stream edit failed, retrying as plain text", formatGrammyError(error));
-          return this.editStreamMessage(chatId, target.messageId, chunk.fallbackText, undefined);
-        });
-        target.text = chunk.text;
-        target.parseMode = chunk.parseMode;
+        await this.editStreamMessage(chatId, target.messageId, chunk);
+        target.text = chunk;
       }
     };
 
@@ -162,33 +189,59 @@ export class TelegramAdapter implements ChatAdapter {
     };
   }
 
+  private startRichMarkdownStream(chatId: string, options?: SendMessageOptions): ChatTextStream {
+    const numericChatId = Number(chatId);
+    const draftId = createDraftId();
+    let hasWarnedAboutDraft = false;
+
+    const sendDraft = async (text: string) => {
+      const draftText = text.trim();
+      if (!draftText) return;
+      const [chunk] = chunkText(draftText, TELEGRAM_RICH_MARKDOWN_CHUNK_LIMIT);
+      if (!chunk) return;
+
+      try {
+        await this.bot.api.sendRichMessageDraft(numericChatId, draftId, {
+          markdown: prepareRichMarkdownDraft(chunk),
+        });
+      } catch (error) {
+        const message = formatGrammyError(error);
+        if (hasWarnedAboutDraft) {
+          log.debug("rich markdown draft update failed", message);
+          return;
+        }
+        hasWarnedAboutDraft = true;
+        log.warn("rich markdown draft update failed; final message will still be sent", message);
+      }
+    };
+
+    return {
+      update: sendDraft,
+      finish: async (text) => {
+        const finalText = text.trim() || "(no response)";
+        await this.sendMessage(chatId, finalText, options);
+      },
+    };
+  }
+
   private async sendStreamMessage(
     chatId: string,
-    chunk: PreparedTelegramMessage,
+    text: string,
     options?: SendMessageOptions,
   ): Promise<SentMessage | undefined> {
     const messageOptions = {
-      parse_mode: chunk.parseMode,
       link_preview_options: { is_disabled: true },
       reply_parameters: options?.replyToMessageId
         ? { message_id: Number(options.replyToMessageId) }
         : undefined,
       reply_markup: toInlineKeyboard(options?.buttons),
     };
-    const message = await this.bot.api.sendMessage(chatId, chunk.text, messageOptions).catch((error) => {
-      if (!chunk.fallbackText) throw error;
-      log.warn("formatted stream send failed, retrying as plain text", formatGrammyError(error));
-      return this.bot.api.sendMessage(chatId, chunk.fallbackText, {
-        ...messageOptions,
-        parse_mode: undefined,
-      });
-    });
+    const message = await this.bot.api.sendMessage(chatId, text, messageOptions);
     return { messageId: String(message.message_id) };
   }
 
-  private async editStreamMessage(chatId: string, messageId: string, text: string, parseMode?: "HTML"): Promise<void> {
+  private async editStreamMessage(chatId: string, messageId: string, text: string): Promise<void> {
     await this.bot.api.editMessageText(chatId, Number(messageId), text, {
-      parse_mode: parseMode,
       link_preview_options: { is_disabled: true },
     }).catch((error) => {
       if (isMessageNotModified(error)) return;
@@ -375,23 +428,22 @@ export class TelegramAdapter implements ChatAdapter {
   }
 }
 
-function prepareTelegramMessages(
-  text: string,
-  render: SendMessageOptions["render"] = "plain",
-): PreparedTelegramMessage[] {
-  const limit = render === "markdown" ? TELEGRAM_MARKDOWN_CHUNK_LIMIT : TELEGRAM_MESSAGE_LIMIT;
-  return chunkText(text, limit).map((chunk) => prepareTelegramMessage(chunk, render));
+function prepareRichMarkdownDraft(text: string): string {
+  return remend(text, {
+    // Telegram Rich Markdown doesn't support the streamdown: placeholder protocol.
+    linkMode: "text-only",
+    // Keep single-dollar currency/model output from being treated as math while streaming.
+    inlineKatex: false,
+  });
 }
 
-function prepareTelegramMessage(
-  text: string,
-  render: SendMessageOptions["render"] = "plain",
-): PreparedTelegramMessage {
-  if (render !== "markdown") return { text };
+function isPrivateChatId(chatId: string): boolean {
+  const numeric = Number(chatId);
+  return Number.isSafeInteger(numeric) && numeric > 0;
+}
 
-  const html = renderTelegramHtml(text);
-  if (html.length > TELEGRAM_MESSAGE_LIMIT) return { text };
-  return { text: html, parseMode: "HTML", fallbackText: text };
+function createDraftId(): number {
+  return Math.max(1, Math.floor(Date.now() % 1_000_000_000));
 }
 
 function toInlineKeyboard(buttons: InlineButton[][] | undefined): InlineKeyboard | undefined {
