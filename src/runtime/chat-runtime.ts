@@ -4,6 +4,7 @@ import type {
   ChatAdapter,
   ChatCallback,
   ChatMessage,
+  MessageRenderMode,
 } from "../adapters/types.ts";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { logger } from "../logger.ts";
@@ -305,7 +306,7 @@ function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {
     }
 
     currentKind = kind;
-    currentOutput = createTextStreamSender(adapter, target);
+    currentOutput = createTextStreamSender(adapter, target, kind === "tool" ? "plain" : "markdown");
     return currentOutput;
   };
 
@@ -335,7 +336,7 @@ function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {
   };
 }
 
-function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget) {
+function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget, render: MessageRenderMode) {
   let text = "";
   let stream: Awaited<ReturnType<ChatAdapter["startTextStream"]>>;
   let streamStarted = false;
@@ -348,7 +349,7 @@ function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget) {
     if (streamStarted) return stream;
     streamStarted = true;
     stream = await adapter.startTextStream(target.chatId, {
-      render: "markdown",
+      render,
       replyToMessageId: target.replyToMessageId,
     });
     return stream;
@@ -404,7 +405,7 @@ function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget) {
         return true;
       }
       await adapter.sendMessage(target.chatId, finalText, {
-        render: "markdown",
+        render,
         replyToMessageId: target.replyToMessageId,
       });
       return true;
