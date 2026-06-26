@@ -4,9 +4,9 @@ import type {
   ChatMessage,
   InlineButton,
   ChatCommand,
-} from "../adapters/types.js";
-import type { ThinkingLevel } from "../pi/runner.js";
-import type { ChatState, ChatStateGetter } from "./chat-runtime.js";
+} from "../adapters/types.ts";
+import type { ThinkingLevel } from "../pi/runner.ts";
+import type { ChatState, ChatStateGetter } from "./chat-runtime.ts";
 import {
   MODELS_HOME,
   RESUME_PREFIX,
@@ -17,7 +17,7 @@ import {
   resumeButtons,
   thinkingButtons,
   workspaceButtons,
-} from "./chat-command-buttons.js";
+} from "./chat-command-buttons.ts";
 import {
   formatHelp,
   formatModelLine,
@@ -29,7 +29,7 @@ import {
   formatStatus,
   formatThinkingMenu,
   formatWorkspaceMenu,
-} from "./chat-command-format.js";
+} from "./chat-command-format.ts";
 
 export const CHAT_COMMANDS: ChatCommand[] = [
   { command: "status", description: "Show current session status" },

@@ -15,7 +15,7 @@ pi-pilot is a Telegram interface for [pi](https://pi.dev/), bringing coding, res
 
 Install and configure [pi](https://pi.dev/) first. pi-pilot reuses its model settings, credentials, sessions, extensions, skills, and prompts.
 
-For Docker, mount the agent data directory to `/home/node/.pi/agent`.
+For Docker, mount the agent data directory to `/home/bun/.pi/agent`.
 
 ## Commands
 
@@ -44,20 +44,11 @@ PI_PILOT_WORKSPACES=/path/to/project,/path/to/other-project
 PI_PILOT_LOG_LEVEL=info
 ```
 
-`pi-pilot` automatically loads `.env` from the current working directory.
-
-Install, build, and start from this repository:
+Install and start from this repository:
 
 ```bash
-pnpm install
-pnpm build
-pnpm start
-```
-
-For development without building first:
-
-```bash
-pnpm dev
+bun install
+bun run start
 ```
 
 ## CLI
@@ -65,8 +56,7 @@ pnpm dev
 For local development, link this repository as a command:
 
 ```bash
-pnpm build
-pnpm link --global
+bun link
 pi-pilot --help
 ```
 
@@ -119,7 +109,7 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - /path/to/projects:/workspace
-      - /path/to/pi:/home/node/.pi
+      - /path/to/pi:/home/bun/.pi
 ```
 
 ### Build locally

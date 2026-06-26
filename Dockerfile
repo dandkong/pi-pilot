@@ -1,36 +1,37 @@
 FROM ghcr.io/astral-sh/uv:latest AS uv
 
-FROM node:24-bookworm
+FROM oven/bun:latest
 
 COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=uv /uvx /usr/local/bin/uvx
 
-RUN corepack enable \
-    && corepack prepare pnpm@10.31.0 --activate \
-    && apt-get update \
+# pi-coding-agent/undici require a recent Node.js runtime.
+# Install Node.js 24 from NodeSource instead of Debian's default nodejs package.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends \
     git \
-    curl \
     wget \
     python3 \
     python3-pip \
     python3-venv \
+    nodejs \
     && node --version \
-    && pnpm --version \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+ENV NODE_ENV=production
+
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile --production
 
 COPY . .
-RUN pnpm build \
-    && pnpm prune --prod \
-    && ln -sf /app/node_modules/.bin/pi /usr/local/bin/pi \
-    && chown -R node:node /app
+RUN ln -s /app/node_modules/.bin/pi /usr/local/bin/pi && chown -R bun:bun /app
 
-ENV NODE_ENV=production
-USER node
+USER bun
 
-CMD ["node", "/app/dist/index.js"]
+CMD ["bun", "/app/index.ts"]

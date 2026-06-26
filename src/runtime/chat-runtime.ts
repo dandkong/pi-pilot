@@ -1,15 +1,15 @@
-import type { RuntimeConfig } from "../config/runtime.js";
+import type { RuntimeConfig } from "../config/runtime.ts";
 import type {
   ChatAttachment,
   ChatAdapter,
   ChatCallback,
   ChatMessage,
   MessageRenderMode,
-} from "../adapters/types.js";
+} from "../adapters/types.ts";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { logger } from "../logger.js";
-import { PiRunner, type ToolEvent } from "../pi/runner.js";
-import { ChatCommands } from "./chat-commands.js";
+import { logger } from "../logger.ts";
+import { PiRunner, type ToolEvent } from "../pi/runner.ts";
+import { ChatCommands } from "./chat-commands.ts";
 
 const log = logger.child("runtime");
 
@@ -341,7 +341,7 @@ function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget, render
   let stream: Awaited<ReturnType<ChatAdapter["startTextStream"]>>;
   let streamStarted = false;
   let pending = Promise.resolve();
-  let scheduled: ReturnType<typeof setTimeout> | undefined;
+  let scheduled: Timer | undefined;
   const minUpdateIntervalMs = 800;
   let lastUpdatedAt = 0;
 

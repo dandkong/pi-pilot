@@ -1,7 +1,6 @@
 .git
 node_modules
-dist
-pnpm-debug.log*
+bun.lockb
 .env
 .env.*
 !.env.example

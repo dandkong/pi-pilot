@@ -1,4 +1,4 @@
-import type { LogLevel } from "./config/schema.js";
+import type { LogLevel } from "./config/schema.ts";
 
 export type { LogLevel };
 

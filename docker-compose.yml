@@ -14,4 +14,4 @@ services:
       PI_PILOT_LOG_LEVEL: ${PI_PILOT_LOG_LEVEL:-info}
     volumes:
       - .:/workspace
-      - ${HOME}/.pi/agent:/home/node/.pi/agent
+      - ${HOME}/.pi/agent:/home/bun/.pi/agent

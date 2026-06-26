@@ -4,8 +4,8 @@ import type { Context } from "grammy";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { logger } from "../logger.js";
-import { chunkText } from "../render/chunking.js";
+import { logger } from "../logger.ts";
+import { chunkText } from "../render/chunking.ts";
 import type {
   ChatAttachment,
   ChatAdapter,
@@ -17,7 +17,7 @@ import type {
   SendMessageOptions,
   SentMessage,
   ChatCommand,
-} from "./types.js";
+} from "./types.ts";
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 const TELEGRAM_RICH_MARKDOWN_CHUNK_LIMIT = 30_000;
@@ -26,7 +26,7 @@ const log = logger.child("telegram");
 
 type MediaGroupState = {
   messages: ChatMessage[];
-  timer: ReturnType<typeof setTimeout>;
+  timer: Timer;
 };
 
 export class TelegramAdapter implements ChatAdapter {
