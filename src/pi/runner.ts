@@ -7,8 +7,8 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { RuntimeConfig } from "../config/runtime.ts";
-import { logger } from "../logger.ts";
+import type { RuntimeConfig } from "../config/runtime.js";
+import { logger } from "../logger.js";
 
 const log = logger.child("pi");
 

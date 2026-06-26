@@ -1,31 +1,36 @@
 FROM ghcr.io/astral-sh/uv:latest AS uv
 
-FROM oven/bun:latest
+FROM node:24-bookworm
 
 COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=uv /uvx /usr/local/bin/uvx
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN corepack enable \
+    && corepack prepare pnpm@10.31.0 --activate \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
     git \
     curl \
     wget \
     python3 \
     python3-pip \
     python3-venv \
-    nodejs \
-    npm \
+    && node --version \
+    && pnpm --version \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-ENV NODE_ENV=production
-
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN ln -s /app/node_modules/.bin/pi /usr/local/bin/pi && chown -R bun:bun /app
+RUN pnpm build \
+    && pnpm prune --prod \
+    && ln -sf /app/node_modules/.bin/pi /usr/local/bin/pi \
+    && chown -R node:node /app
 
-USER bun
+ENV NODE_ENV=production
+USER node
 
-CMD ["bun", "/app/index.ts"]
+CMD ["node", "/app/dist/index.js"]

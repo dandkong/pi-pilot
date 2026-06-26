@@ -1,8 +1,9 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
-import { formatHelp, parseCliArgs, readPackageVersion } from "./src/cli.ts";
-import { loadConfig } from "./src/config/runtime.ts";
-import { configureLogger } from "./src/logger.ts";
+import "dotenv/config";
+import { formatHelp, parseCliArgs, readPackageVersion } from "./src/cli.js";
+import { loadConfig } from "./src/config/runtime.js";
+import { configureLogger } from "./src/logger.js";
 
 let cli;
 try {
@@ -34,9 +35,9 @@ try {
 }
 
 const [{ TelegramAdapter }, { CHAT_COMMANDS }, { ChatRuntime }] = await Promise.all([
-  import("./src/adapters/telegram.ts"),
-  import("./src/runtime/chat-commands.ts"),
-  import("./src/runtime/chat-runtime.ts"),
+  import("./src/adapters/telegram.js"),
+  import("./src/runtime/chat-commands.js"),
+  import("./src/runtime/chat-runtime.js"),
 ]);
 const adapter = new TelegramAdapter(config.telegramToken, CHAT_COMMANDS);
 const runtime = new ChatRuntime(config, adapter, {

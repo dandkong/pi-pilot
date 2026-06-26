@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { type ConfigOverrides, type LogLevel, resolveConfigValues } from "./schema.ts";
+import { type ConfigOverrides, type LogLevel, resolveConfigValues } from "./schema.js";
 
 export type RuntimeConfig = {
   telegramToken: string;

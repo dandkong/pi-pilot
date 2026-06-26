@@ -1,6 +1,6 @@
-import type { ChatCommand } from "../adapters/types.ts";
-import type { ModelInfo, ProviderModels, RecentMessage, RunnerStatus } from "../pi/runner.ts";
-import type { SessionListItem, ThinkingLevel, WorkspaceListItem } from "../pi/runner.ts";
+import type { ChatCommand } from "../adapters/types.js";
+import type { ModelInfo, ProviderModels, RecentMessage, RunnerStatus } from "../pi/runner.js";
+import type { SessionListItem, ThinkingLevel, WorkspaceListItem } from "../pi/runner.js";
 
 export function formatHelp(commands: ChatCommand[]): string {
   return [

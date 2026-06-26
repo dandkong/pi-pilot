@@ -1,6 +1,6 @@
-import type { InlineButton } from "../adapters/types.ts";
-import type { ProviderModels } from "../pi/runner.ts";
-import type { SessionListItem, ThinkingLevel, WorkspaceListItem } from "../pi/runner.ts";
+import type { InlineButton } from "../adapters/types.js";
+import type { ProviderModels } from "../pi/runner.js";
+import type { SessionListItem, ThinkingLevel, WorkspaceListItem } from "../pi/runner.js";
 
 export const MODELS_HOME = "models:home";
 export const RESUME_PREFIX = "resume";
