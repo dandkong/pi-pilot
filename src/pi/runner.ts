@@ -86,7 +86,7 @@ export type RecentMessage = {
 /**
  * Workspace: cwd-bound session management.
  * Owns settings, sessions, and agent session for a single working directory.
- * Global resources (auth, model registry) are injected from PiRunner.
+ * Global model/auth runtime is injected from PiRunner.
  */
 class Workspace {
   private session: AgentSession | undefined;
@@ -287,11 +287,10 @@ class Workspace {
 }
 
 /**
- * PiRunner: global singleton that owns auth and model registry,
+ * PiRunner: global singleton that owns the model/auth runtime,
  * delegates session work to the current Workspace.
  */
 export class PiRunner {
-  private modelRuntime: ModelRuntime | undefined;
   private modelRuntimePromise: Promise<ModelRuntime> | undefined;
   private workspace: Workspace | undefined;
   private currentCwd: string;
@@ -308,9 +307,7 @@ export class PiRunner {
 
   setOutputCallback(callback: RunnerOutputCallback): void {
     this.outputCallback = callback;
-    void this.getWorkspace()
-      .then((workspace) => workspace.setOutputCallback(callback))
-      .catch((error) => log.error("failed to initialize workspace", error));
+    this.workspace?.setOutputCallback(callback);
   }
 
   async run(prompt: string): Promise<void> {
@@ -412,7 +409,6 @@ export class PiRunner {
   dispose(): void {
     this.workspace?.dispose();
     this.workspace = undefined;
-    this.modelRuntime = undefined;
     this.modelRuntimePromise = undefined;
     this.currentCwd = this.config.workspaces[0] ?? process.cwd();
   }
@@ -430,10 +426,7 @@ export class PiRunner {
 
   private getModelRuntime(): Promise<ModelRuntime> {
     if (!this.modelRuntimePromise) {
-      this.modelRuntimePromise = ModelRuntime.create().then((runtime) => {
-        this.modelRuntime = runtime;
-        return runtime;
-      });
+      this.modelRuntimePromise = ModelRuntime.create();
     }
     return this.modelRuntimePromise;
   }
