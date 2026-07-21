@@ -1,8 +1,7 @@
 import {
-  AuthStorage,
   createAgentSession,
   type AgentSession,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -12,7 +11,7 @@ import { logger } from "../logger.ts";
 
 const log = logger.child("pi");
 
-export type ModelInfo = ReturnType<ModelRegistry["getAvailable"]>[number];
+export type ModelInfo = Awaited<ReturnType<ModelRuntime["getAvailable"]>>[number];
 
 export type ProviderModels = {
   provider: string;
@@ -98,8 +97,7 @@ class Workspace {
 
   constructor(
     readonly cwd: string,
-    private readonly authStorage: AuthStorage,
-    private readonly modelRegistry: ModelRegistry,
+    private readonly modelRuntime: ModelRuntime,
   ) {}
 
   setOutputCallback(callback: RunnerOutputCallback): void {
@@ -168,7 +166,7 @@ class Workspace {
 
   async setModel(provider: string, modelIndex: number): Promise<ModelInfo> {
     const session = await this.getSession();
-    const allModels = this.modelRegistry.getAvailable().sort(compareModels);
+    const allModels = [...(await this.modelRuntime.getAvailable())].sort(compareModels);
     const providerModels = allModels.filter((m) => m.provider === provider);
     const model = providerModels[modelIndex];
     if (!model) throw new Error(`Unknown model selection: ${provider} #${modelIndex}`);
@@ -246,8 +244,7 @@ class Workspace {
 
     const { session } = await createAgentSession({
       cwd: this.cwd,
-      authStorage: this.authStorage,
-      modelRegistry: this.modelRegistry,
+      modelRuntime: this.modelRuntime,
       settingsManager,
       sessionManager,
     });
@@ -294,8 +291,8 @@ class Workspace {
  * delegates session work to the current Workspace.
  */
 export class PiRunner {
-  private authStorage: AuthStorage | undefined;
-  private modelRegistry: ModelRegistry | undefined;
+  private modelRuntime: ModelRuntime | undefined;
+  private modelRuntimePromise: Promise<ModelRuntime> | undefined;
   private workspace: Workspace | undefined;
   private currentCwd: string;
   private outputCallback: RunnerOutputCallback | undefined;
@@ -305,26 +302,30 @@ export class PiRunner {
   }
 
   async init(): Promise<void> {
-    await this.getWorkspace().init();
+    const workspace = await this.getWorkspace();
+    await workspace.init();
   }
 
   setOutputCallback(callback: RunnerOutputCallback): void {
     this.outputCallback = callback;
-    this.getWorkspace().setOutputCallback(callback);
+    void this.getWorkspace()
+      .then((workspace) => workspace.setOutputCallback(callback))
+      .catch((error) => log.error("failed to initialize workspace", error));
   }
 
   async run(prompt: string): Promise<void> {
-    return this.getWorkspace().run(prompt);
+    return (await this.getWorkspace()).run(prompt);
   }
 
   async getStatus(): Promise<RunnerStatus> {
-    return this.getWorkspace().getStatus();
+    return (await this.getWorkspace()).getStatus();
   }
 
   async getProviderModels(): Promise<ProviderModels[]> {
-    await this.getWorkspace().init();
-    const registry = this.getModelRegistry();
-    const models = registry.getAvailable().sort(compareModels);
+    const workspace = await this.getWorkspace();
+    await workspace.init();
+    const runtime = await this.getModelRuntime();
+    const models = [...(await runtime.getAvailable())].sort(compareModels);
     const groups = new Map<string, ModelInfo[]>();
 
     for (const model of models) {
@@ -335,47 +336,47 @@ export class PiRunner {
 
     return [...groups.entries()].map(([provider, providerModels]) => ({
       provider,
-      displayName: registry.getProviderDisplayName(provider),
+      displayName: runtime.getProvider(provider)?.name ?? provider,
       models: providerModels,
     }));
   }
 
   async setModel(provider: string, modelIndex: number): Promise<ModelInfo> {
-    return this.getWorkspace().setModel(provider, modelIndex);
+    return (await this.getWorkspace()).setModel(provider, modelIndex);
   }
 
   async getAvailableThinkingLevels(): Promise<ThinkingLevel[]> {
-    return this.getWorkspace().getAvailableThinkingLevels();
+    return (await this.getWorkspace()).getAvailableThinkingLevels();
   }
 
   async setThinkingLevel(level: ThinkingLevel): Promise<ThinkingLevel> {
-    return this.getWorkspace().setThinkingLevel(level);
+    return (await this.getWorkspace()).setThinkingLevel(level);
   }
 
   async reload(): Promise<void> {
     this.workspace?.dispose();
     this.workspace = undefined;
-    await this.getWorkspace().init();
+    await (await this.getWorkspace()).init();
   }
 
   async getRuntimeStatus(): Promise<RuntimeStatus> {
-    return this.getWorkspace().getRuntimeStatus();
+    return (await this.getWorkspace()).getRuntimeStatus();
   }
 
   async getRecentMessages(limit = 6): Promise<RecentMessage[]> {
-    return this.getWorkspace().getRecentMessages(limit);
+    return (await this.getWorkspace()).getRecentMessages(limit);
   }
 
   async abort(): Promise<void> {
-    return this.getWorkspace().abort();
+    return (await this.getWorkspace()).abort();
   }
 
   async compact(): Promise<void> {
-    return this.getWorkspace().compact();
+    return (await this.getWorkspace()).compact();
   }
 
   async listSessions(): Promise<SessionListItem[]> {
-    return this.getWorkspace().listSessions();
+    return (await this.getWorkspace()).listSessions();
   }
 
   listWorkspaces(): WorkspaceListItem[] {
@@ -394,42 +395,47 @@ export class PiRunner {
       this.workspace?.dispose();
       this.workspace = undefined;
       this.currentCwd = cwd;
-      await this.getWorkspace().init();
+      await (await this.getWorkspace()).init();
     }
 
     return { index, cwd, current: true };
   }
 
   async switchSession(index: number): Promise<SessionListItem> {
-    return this.getWorkspace().switchSession(index);
+    return (await this.getWorkspace()).switchSession(index);
   }
 
   async newSession(): Promise<string> {
-    return this.getWorkspace().newSession();
+    return (await this.getWorkspace()).newSession();
   }
 
   dispose(): void {
     this.workspace?.dispose();
     this.workspace = undefined;
-    this.modelRegistry = undefined;
-    this.authStorage = undefined;
+    this.modelRuntime = undefined;
+    this.modelRuntimePromise = undefined;
     this.currentCwd = this.config.workspaces[0] ?? process.cwd();
   }
 
-  private getWorkspace(): Workspace {
+  private async getWorkspace(): Promise<Workspace> {
     if (!this.workspace) {
-      this.authStorage = this.authStorage ?? AuthStorage.create();
-      this.modelRegistry = this.modelRegistry ?? ModelRegistry.create(this.authStorage);
-
-      this.workspace = new Workspace(this.currentCwd, this.authStorage, this.modelRegistry);
-      if (this.outputCallback) this.workspace.setOutputCallback(this.outputCallback);
+      const modelRuntime = await this.getModelRuntime();
+      if (!this.workspace) {
+        this.workspace = new Workspace(this.currentCwd, modelRuntime);
+        if (this.outputCallback) this.workspace.setOutputCallback(this.outputCallback);
+      }
     }
     return this.workspace;
   }
 
-  private getModelRegistry(): ModelRegistry {
-    if (!this.modelRegistry) throw new Error("Pi model registry was not initialized");
-    return this.modelRegistry;
+  private getModelRuntime(): Promise<ModelRuntime> {
+    if (!this.modelRuntimePromise) {
+      this.modelRuntimePromise = ModelRuntime.create().then((runtime) => {
+        this.modelRuntime = runtime;
+        return runtime;
+      });
+    }
+    return this.modelRuntimePromise;
   }
 }
 
