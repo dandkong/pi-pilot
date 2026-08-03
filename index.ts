@@ -64,5 +64,10 @@ if (config.allowedActorIds.length === 0) {
 }
 
 console.log(`Pi Pilot backend started. workspace=${config.workspaces[0]}`);
-await runtime.warmup();
-await adapter.start();
+try {
+  await runtime.warmup();
+  await adapter.start();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
