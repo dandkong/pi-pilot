@@ -27,7 +27,7 @@ export type ToolEvent = {
   isError?: unknown;
 };
 
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type RunnerOutputCallback = (event: AgentSessionEvent) => void;
 

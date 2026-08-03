@@ -336,21 +336,22 @@ export class ChatCommands {
   }
 
   private async selectThinkingLevel(callback: ChatCallback): Promise<void> {
-    const rawLevel = callback.data.slice(`${THINKING_PREFIX}:`.length);
-    if (!isThinkingLevel(rawLevel)) throw new Error("Invalid thinking level");
+    // The level always comes from buttons generated via getAvailableThinkingLevels(),
+    // and pi's session clamps unknown values anyway, so no whitelist here.
+    const level = callback.data.slice(`${THINKING_PREFIX}:`.length) as ThinkingLevel;
 
     const activity = await this.requireIdleCallback(callback, "Cannot change thinking while a task is running");
     if (!activity) return;
 
-    const level = await activity.state.runner.setThinkingLevel(rawLevel);
+    const applied = await activity.state.runner.setThinkingLevel(level);
     const levels = await activity.state.runner.getAvailableThinkingLevels();
     const status = await activity.state.runner.getStatus();
     await this.editCallbackMessage(
       callback,
-      formatThinkingMenu(levels, level, status.model),
-      thinkingButtons(levels, level),
+      formatThinkingMenu(levels, applied, status.model),
+      thinkingButtons(levels, applied),
     );
-    await this.adapter.answerCallback(callback, `Thinking set to ${level}`);
+    await this.adapter.answerCallback(callback, `Thinking set to ${applied}`);
   }
 
   private async sendReload(
@@ -515,8 +516,4 @@ function isActive(activity: ActivityState): boolean {
 function parseCommand(text: string): string | undefined {
   const match = text.trim().match(/^\/(\w+)(?:@\w+)?(?:\s|$)/);
   return match?.[1]?.toLowerCase();
-}
-
-function isThinkingLevel(value: string): value is ThinkingLevel {
-  return ["off", "minimal", "low", "medium", "high", "xhigh"].includes(value);
 }
