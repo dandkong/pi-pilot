@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import {
   createAgentSession,
   type AgentSession,
@@ -39,6 +40,10 @@ export type SessionListItem = {
   firstMessage: string;
   modified: Date;
 };
+
+export type DeleteSessionResult =
+  | { ok: true; session: SessionListItem }
+  | { ok: false; reason: string };
 
 export type WorkspaceListItem = {
   index: number;
@@ -227,6 +232,15 @@ class Workspace {
     return this.session!.sessionId;
   }
 
+  async deleteSession(id: string): Promise<DeleteSessionResult> {
+    const sessions = await this.listSessions();
+    const target = sessions.find((session) => session.id === id);
+    if (!target) return { ok: false, reason: "Session not found or already deleted" };
+
+    await rm(target.path, { force: true });
+    return { ok: true, session: target };
+  }
+
   dispose(): void {
     this.unsubscribeSession?.();
     this.unsubscribeSession = undefined;
@@ -404,6 +418,10 @@ export class PiRunner {
 
   async newSession(): Promise<string> {
     return (await this.getWorkspace()).newSession();
+  }
+
+  async deleteSession(id: string): Promise<DeleteSessionResult> {
+    return (await this.getWorkspace()).deleteSession(id);
   }
 
   dispose(): void {

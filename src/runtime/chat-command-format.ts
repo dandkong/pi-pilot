@@ -87,6 +87,11 @@ export function formatResumeMenu(sessions: SessionListItem[]): string {
   ].join("\n");
 }
 
+export function formatDeleteMenu(sessions: SessionListItem[]): string {
+  if (!sessions.length) return "No sessions to delete.";
+  return sessions.map((s, index) => `${index + 1}. ${formatSessionLabel(s)}`).join("\n");
+}
+
 export function formatRecentMessages(messages: RecentMessage[]): string {
   if (!messages.length) return "No recent user, assistant, or summary messages.";
   return messages

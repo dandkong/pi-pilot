@@ -6,12 +6,15 @@ import type {
   ChatCommand,
 } from "../adapters/types.ts";
 import type { ThinkingLevel } from "../pi/runner.ts";
+import type { SessionListItem } from "../pi/runner.ts";
 import type { ChatState, ChatStateGetter } from "./chat-runtime.ts";
 import {
+  DELETE_PREFIX,
   MODELS_HOME,
   RESUME_PREFIX,
   THINKING_PREFIX,
   WORKSPACE_PREFIX,
+  deleteButtons,
   modelButtons,
   providerButtons,
   resumeButtons,
@@ -19,6 +22,7 @@ import {
   workspaceButtons,
 } from "./chat-command-buttons.ts";
 import {
+  formatDeleteMenu,
   formatHelp,
   formatModelLine,
   formatModelMenu,
@@ -37,6 +41,7 @@ export const CHAT_COMMANDS: ChatCommand[] = [
   { command: "models", description: "Choose model" },
   { command: "thinking", description: "Set thinking level" },
   { command: "resume", description: "Resume a previous session" },
+  { command: "delete", description: "Delete a previous session" },
   { command: "recent", description: "Show recent session messages" },
   { command: "new", description: "Start a new session" },
   { command: "stop", description: "Abort current task" },
@@ -98,6 +103,11 @@ export class ChatCommands {
 
     if (command === "resume") {
       await this.sendResumeMenu(message.chatId, message.messageId);
+      return true;
+    }
+
+    if (command === "delete") {
+      await this.sendDeleteMenu(message.chatId, message.messageId);
       return true;
     }
 
@@ -172,6 +182,11 @@ export class ChatCommands {
 
       if (callback.data.startsWith(`${RESUME_PREFIX}:`)) {
         await this.selectResumeSession(callback);
+        return;
+      }
+
+      if (callback.data.startsWith(`${DELETE_PREFIX}:`)) {
+        await this.selectDeleteSession(callback);
         return;
       }
 
@@ -254,6 +269,29 @@ export class ChatCommands {
     });
   }
 
+  private async sendDeleteMenu(
+    chatId: string,
+    replyToMessageId?: string,
+  ): Promise<void> {
+    const state = await this.getState();
+    const sessions = await this.deleteMenuSessions(state);
+    if (!sessions.length) {
+      await this.adapter.sendMessage(chatId, "No sessions to delete.", { replyToMessageId });
+      return;
+    }
+    await this.adapter.sendMessage(chatId, formatDeleteMenu(sessions), {
+      replyToMessageId,
+      buttons: deleteButtons(sessions),
+    });
+  }
+
+  private async deleteMenuSessions(state: ChatState): Promise<SessionListItem[]> {
+    const status = await state.runner.getStatus();
+    return (await state.runner.listSessions()).filter(
+      (session) => session.id !== status.sessionId,
+    );
+  }
+
   private async sendWorkspaceMenu(
     chatId: string,
     replyToMessageId?: string,
@@ -319,6 +357,29 @@ export class ChatCommands {
     const label = formatSessionLabel(target);
     await this.editCallbackMessage(callback, `Resumed session:\n${label}`, []);
     await this.adapter.answerCallback(callback, `Resumed ${target.id.slice(0, 8)}`);
+  }
+
+  private async selectDeleteSession(callback: ChatCallback): Promise<void> {
+    const sessionId = callback.data.slice(`${DELETE_PREFIX}:`.length);
+    if (!sessionId) throw new Error("Invalid session selection");
+
+    const activity = await this.requireIdleCallback(callback, "Cannot delete session while a task is running");
+    if (!activity) return;
+
+    const result = await activity.state.runner.deleteSession(sessionId);
+    if (!result.ok) {
+      await this.adapter.answerCallback(callback, result.reason);
+      return;
+    }
+    const deleted = result.session;
+    const sessions = await this.deleteMenuSessions(activity.state);
+
+    await this.editCallbackMessage(
+      callback,
+      formatDeleteMenu(sessions),
+      deleteButtons(sessions),
+    );
+    await this.adapter.answerCallback(callback, `Deleted ${deleted.id.slice(0, 8)}`);
   }
 
   private async selectWorkspace(callback: ChatCallback): Promise<void> {

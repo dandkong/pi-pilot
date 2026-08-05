@@ -6,12 +6,23 @@ export const MODELS_HOME = "models:home";
 export const RESUME_PREFIX = "resume";
 export const THINKING_PREFIX = "thinking";
 export const WORKSPACE_PREFIX = "workspace";
+export const DELETE_PREFIX = "delete";
 
 export function resumeButtons(sessions: SessionListItem[]): InlineButton[][] {
   return [sessions.map((_, index) => ({
     text: String(index + 1),
     callbackData: `${RESUME_PREFIX}:${index}`,
   }))];
+}
+
+export function deleteButtons(sessions: SessionListItem[]): InlineButton[][] {
+  return chunkButtons(
+    sessions.map((session, index) => ({
+      text: String(index + 1),
+      callbackData: `${DELETE_PREFIX}:${session.id}`,
+    })),
+    5,
+  );
 }
 
 export function workspaceButtons(workspaces: WorkspaceListItem[]): InlineButton[][] {
