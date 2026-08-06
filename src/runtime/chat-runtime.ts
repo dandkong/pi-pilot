@@ -97,10 +97,10 @@ export class ChatRuntime {
     }
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     if (!this.state) return;
     this.state.queue.length = 0;
-    this.state.runner.dispose();
+    await this.state.runner.dispose();
     this.state = undefined;
     this.currentOutput = undefined;
   }

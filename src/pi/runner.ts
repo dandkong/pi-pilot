@@ -1,7 +1,12 @@
 import { rm } from "node:fs/promises";
 import {
-  createAgentSession,
   type AgentSession,
+  AgentSessionRuntime,
+  type CreateAgentSessionRuntimeFactory,
+  createAgentSessionFromServices,
+  createAgentSessionRuntime,
+  createAgentSessionServices,
+  getAgentDir,
   ModelRuntime,
   SessionManager,
   SettingsManager,
@@ -94,8 +99,7 @@ export type RecentMessage = {
  * Global model/auth runtime is injected from PiRunner.
  */
 class Workspace {
-  private session: AgentSession | undefined;
-  private settingsManager: SettingsManager | undefined;
+  private runtime: AgentSessionRuntime | undefined;
   private initPromise: Promise<void> | undefined;
   private outputCallback: RunnerOutputCallback | undefined;
   private unsubscribeSession: (() => void) | undefined;
@@ -110,10 +114,10 @@ class Workspace {
   }
 
   async init(): Promise<void> {
-    if (this.session) return;
+    if (this.runtime) return;
     if (this.initPromise) return this.initPromise;
 
-    this.initPromise = this.createSession();
+    this.initPromise = this.createInitialRuntime();
     try {
       await this.initPromise;
     } finally {
@@ -213,23 +217,16 @@ class Workspace {
     const target = sessions[index];
     if (!target) throw new Error(`Invalid session index: ${index}`);
 
-    this.session?.dispose();
-    this.session = undefined;
-
-    const sessionManager = SessionManager.open(target.path, undefined, this.cwd);
-    await this.createSession(sessionManager);
+    // Official replacement API: emits session_before_switch/session_shutdown
+    // extension hooks, rebuilds cwd-bound services, and rebinds via setRebindSession().
+    await this.replaceSession((runtime) => runtime.switchSession(target.path, { cwdOverride: this.cwd }));
 
     return target;
   }
 
   async newSession(): Promise<string> {
-    this.session?.dispose();
-    this.session = undefined;
-
-    const sessionManager = SessionManager.create(this.cwd);
-    await this.createSession(sessionManager);
-
-    return this.session!.sessionId;
+    await this.replaceSession((runtime) => runtime.newSession());
+    return this.requireRuntime().session.sessionId;
   }
 
   async deleteSession(id: string): Promise<DeleteSessionResult> {
@@ -241,36 +238,69 @@ class Workspace {
     return { ok: true, session: target };
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     this.unsubscribeSession?.();
     this.unsubscribeSession = undefined;
-    this.session?.dispose();
-    this.session = undefined;
-    this.settingsManager = undefined;
+    await this.runtime?.dispose();
+    this.runtime = undefined;
   }
 
-  private async createSession(sessionManager?: SessionManager): Promise<void> {
-    const settingsManager = this.settingsManager ?? createTrustedSettingsManager(this.cwd);
-
-    if (!sessionManager) {
-      sessionManager = SessionManager.continueRecent(this.cwd);
-    }
-
-    const { session } = await createAgentSession({
+  /**
+   * Create the initial AgentSessionRuntime for this workspace cwd.
+   * The runtime owns session replacement (new/resume) and re-runs the factory
+   * below for each replacement, so replaced sessions get fresh cwd-bound services.
+   */
+  private async createInitialRuntime(): Promise<void> {
+    const sessionManager = SessionManager.continueRecent(this.cwd);
+    const runtime = await createAgentSessionRuntime(this.createRuntimeFactory(), {
       cwd: this.cwd,
-      modelRuntime: this.modelRuntime,
-      settingsManager,
+      agentDir: getAgentDir(),
       sessionManager,
     });
 
-    this.settingsManager = settingsManager;
-    this.session = session;
+    this.runtime = runtime;
 
-    // SDK direct createAgentSession() does not emit extension session_start by itself.
-    // Bind extensions explicitly so session_start/resources_discover lifecycle hooks run.
+    // Official hook: called by AgentSessionRuntime after every session replacement.
+    runtime.setRebindSession((session) => this.rebindSession(session));
+    await this.rebindSession(runtime.session);
+    this.logDiagnostics(runtime);
+  }
+
+  private createRuntimeFactory(): CreateAgentSessionRuntimeFactory {
+    return async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
+      const services = await createAgentSessionServices({
+        cwd,
+        agentDir,
+        settingsManager: createTrustedSettingsManager(cwd),
+        modelRuntime: this.modelRuntime,
+      });
+      return {
+        ...(await createAgentSessionFromServices({ services, sessionManager, sessionStartEvent })),
+        services,
+        diagnostics: services.diagnostics,
+      };
+    };
+  }
+
+  private async replaceSession(
+    action: (runtime: AgentSessionRuntime) => Promise<{ cancelled: boolean }>,
+  ): Promise<void> {
+    const result = await action(this.requireRuntime());
+    if (result.cancelled) {
+      throw new Error("Session switch was cancelled by an extension");
+    }
+    this.logDiagnostics(this.requireRuntime());
+  }
+
+  /**
+   * Attach host-level notifications to a (possibly replaced) session:
+   * bind extensions and subscribe to events. SDK session creation does not
+   * emit extension session_start by itself, so bind explicitly for the
+   * session_start/resources_discover lifecycle hooks.
+   */
+  private async rebindSession(session: AgentSession): Promise<void> {
     await session.bindExtensions({});
 
-    // Subscribe once for host-level notifications that are not tied to a run callback.
     this.unsubscribeSession?.();
     this.unsubscribeSession = session.subscribe((event) => {
       this.outputCallback?.(event);
@@ -291,10 +321,25 @@ class Workspace {
     });
   }
 
+  private logDiagnostics(runtime: AgentSessionRuntime): void {
+    for (const diagnostic of runtime.diagnostics) {
+      if (diagnostic.type === "warning" || diagnostic.type === "error") {
+        log.warn(`session runtime diagnostic [${diagnostic.type}]`, { message: diagnostic.message });
+      }
+    }
+    if (runtime.modelFallbackMessage) {
+      log.warn("session model fallback", { message: runtime.modelFallbackMessage });
+    }
+  }
+
+  private requireRuntime(): AgentSessionRuntime {
+    if (!this.runtime) throw new Error("Pi session was not initialized");
+    return this.runtime;
+  }
+
   private async getSession(): Promise<AgentSession> {
     await this.init();
-    if (!this.session) throw new Error("Pi session was not initialized");
-    return this.session;
+    return this.requireRuntime().session;
   }
 
 
@@ -365,7 +410,7 @@ export class PiRunner {
   }
 
   async reload(): Promise<void> {
-    this.workspace?.dispose();
+    await this.workspace?.dispose();
     this.workspace = undefined;
     await (await this.getWorkspace()).init();
   }
@@ -403,7 +448,7 @@ export class PiRunner {
     if (!cwd) throw new Error(`Invalid workspace index: ${index}`);
 
     if (cwd !== this.currentCwd) {
-      this.workspace?.dispose();
+      await this.workspace?.dispose();
       this.workspace = undefined;
       this.currentCwd = cwd;
       await (await this.getWorkspace()).init();
@@ -424,8 +469,8 @@ export class PiRunner {
     return (await this.getWorkspace()).deleteSession(id);
   }
 
-  dispose(): void {
-    this.workspace?.dispose();
+  async dispose(): Promise<void> {
+    await this.workspace?.dispose();
     this.workspace = undefined;
     this.modelRuntimePromise = undefined;
     this.currentCwd = this.config.workspaces[0] ?? process.cwd();

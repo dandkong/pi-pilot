@@ -52,7 +52,7 @@ const shutdown = async (signal: string, exit = false) => {
   shuttingDown = true;
   console.log(`Received ${signal}. Stopping Pi Pilot backend...`);
   await adapter.stop().catch((error) => console.error("Failed to stop adapter", error));
-  runtime.dispose();
+  await runtime.dispose();
   if (exit) process.exit(0);
 };
 
