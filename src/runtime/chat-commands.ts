@@ -222,14 +222,10 @@ export class ChatCommands {
       return;
     }
     activity.state.queue.length = 0;
-    const cleared = await activity.state.runner.abort();
-    const discarded = [...cleared.steering, ...cleared.followUp];
-
+    await activity.state.runner.abort();
     await this.adapter.sendMessage(
       chatId,
-      discarded.length
-        ? `Task aborted. Discarded queued messages:\n${discarded.map((text) => `• ${text}`).join("\n")}`
-        : "Task aborted.",
+      "Task aborted.",
       { replyToMessageId },
     );
   }

@@ -207,11 +207,10 @@ class Workspace {
     return session.thinkingLevel as ThinkingLevel;
   }
 
-  async abort(): Promise<{ steering: string[]; followUp: string[] }> {
+  async abort(): Promise<void> {
     const session = await this.getSession();
-    const cleared = session.clearQueue();
+    session.clearQueue();
     await session.abort();
-    return cleared;
   }
 
   async compact(): Promise<void> {
@@ -439,7 +438,7 @@ export class PiRunner {
     return (await this.getWorkspace()).getRecentMessages(limit);
   }
 
-  async abort(): Promise<{ steering: string[]; followUp: string[] }> {
+  async abort(): Promise<void> {
     return (await this.getWorkspace()).abort();
   }
 
