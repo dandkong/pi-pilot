@@ -401,12 +401,13 @@ export class ChatCommands {
     // and pi's session clamps unknown values anyway, so no whitelist here.
     const level = callback.data.slice(`${THINKING_PREFIX}:`.length) as ThinkingLevel;
 
-    const activity = await this.requireIdleCallback(callback, "Cannot change thinking while a task is running");
-    if (!activity) return;
-
-    const applied = await activity.state.runner.setThinkingLevel(level);
-    const levels = await activity.state.runner.getAvailableThinkingLevels();
-    const status = await activity.state.runner.getStatus();
+    // No idle guard: pi re-reads model and thinking level at every turn boundary
+    // (see _installAgentNextTurnRefresh), so a change applies from the next turn
+    // and never disturbs the LLM call already in flight.
+    const state = await this.getState();
+    const applied = await state.runner.setThinkingLevel(level);
+    const levels = await state.runner.getAvailableThinkingLevels();
+    const status = await state.runner.getStatus();
     await this.editCallbackMessage(
       callback,
       formatThinkingMenu(levels, applied, status.model),
@@ -517,6 +518,13 @@ export class ChatCommands {
       `Selected model:\n${formatModelLine(model.provider, model.name, status.thinkingLevel)}`,
       [[{ text: "Back to providers", callbackData: MODELS_HOME }]],
     );
+
+    // Offer the thinking level for the freshly selected model as its own message,
+    // so the model menu stays usable. pi clamps the level to the new model's
+    // capabilities, so this menu shows the level actually in effect.
+    const levels = await state.runner.getAvailableThinkingLevels();
+    if (levels.length > 1) await this.sendThinkingMenu(callback.chatId);
+
     await this.adapter.answerCallback(callback, `Model set to ${model.name}`);
   }
 
