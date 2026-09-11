@@ -35,6 +35,9 @@ export type ToolEvent = {
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+/** How a prompt issued while the agent is running is delivered. */
+export type SteerMode = "steer" | "followUp";
+
 export type RunnerOutputCallback = (event: AgentSessionEvent) => void;
 
 export type SessionListItem = {
@@ -125,9 +128,18 @@ class Workspace {
     }
   }
 
-  async run(prompt: string): Promise<void> {
+  async run(
+    prompt: string,
+    options: { streamingBehavior?: SteerMode } = {},
+  ): Promise<void> {
     const session = await this.getSession();
-    await session.prompt(prompt, { source: "rpc" });
+    // pi only accepts streamingBehavior while a run is in flight; passing it
+    // when idle would start a second concurrent prompt.
+    const streamingBehavior = session.isStreaming ? options.streamingBehavior : undefined;
+    await session.prompt(prompt, {
+      source: "rpc",
+      ...(streamingBehavior ? { streamingBehavior } : {}),
+    });
   }
 
   async getStatus(): Promise<RunnerStatus> {
@@ -195,10 +207,11 @@ class Workspace {
     return session.thinkingLevel as ThinkingLevel;
   }
 
-  async abort(): Promise<void> {
+  async abort(): Promise<{ steering: string[]; followUp: string[] }> {
     const session = await this.getSession();
-    session.clearQueue();
+    const cleared = session.clearQueue();
     await session.abort();
+    return cleared;
   }
 
   async compact(): Promise<void> {
@@ -369,8 +382,11 @@ export class PiRunner {
     this.workspace?.setOutputCallback(callback);
   }
 
-  async run(prompt: string): Promise<void> {
-    return (await this.getWorkspace()).run(prompt);
+  async run(
+    prompt: string,
+    options: { streamingBehavior?: SteerMode } = {},
+  ): Promise<void> {
+    return (await this.getWorkspace()).run(prompt, options);
   }
 
   async getStatus(): Promise<RunnerStatus> {
@@ -423,7 +439,7 @@ export class PiRunner {
     return (await this.getWorkspace()).getRecentMessages(limit);
   }
 
-  async abort(): Promise<void> {
+  async abort(): Promise<{ steering: string[]; followUp: string[] }> {
     return (await this.getWorkspace()).abort();
   }
 

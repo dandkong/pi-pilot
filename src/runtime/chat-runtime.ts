@@ -219,6 +219,15 @@ export class ChatRuntime {
 
   private async enqueueMessage(message: ChatMessage): Promise<void> {
     const state = await this.getState();
+    const status = await state.runner.getRuntimeStatus();
+
+    // Mid-run insertion: a steering message is delivered after the current
+    // assistant turn finishes its tool calls, before the next LLM call.
+    if (status.isStreaming) {
+      await this.submitSteer(message, state);
+      return;
+    }
+
     const shouldQueue = state.processingQueue || state.queue.length > 0 || await this.isRunnerBusy(state);
 
     state.queue.push(message);
@@ -231,8 +240,24 @@ export class ChatRuntime {
     await this.drainQueue(state);
   }
 
-  private async sendQueued(message: ChatMessage): Promise<void> {
-    await this.adapter.sendMessage(message.chatId, "Queued.", {
+  private async submitSteer(message: ChatMessage, state: ChatState): Promise<void> {
+    const prompt = formatPrompt(message.text.trim(), message.attachments);
+
+    try {
+      await state.runner.run(prompt, { streamingBehavior: "steer" });
+      await this.sendQueued(message, "⚡ Steered.");
+    } catch (error) {
+      // Steering can lose the race with the end of a run; fall back to the
+      // local queue instead of dropping the message.
+      log.warn(`[chat ${message.chatId}] steer failed, queueing instead`, error);
+      state.queue.push(message);
+      await this.sendQueued(message);
+      await this.drainQueueIfIdle();
+    }
+  }
+
+  private async sendQueued(message: ChatMessage, text = "Queued."): Promise<void> {
+    await this.adapter.sendMessage(message.chatId, text, {
       replyToMessageId: message.messageId || undefined,
     });
   }

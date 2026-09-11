@@ -222,10 +222,14 @@ export class ChatCommands {
       return;
     }
     activity.state.queue.length = 0;
-    await activity.state.runner.abort();
+    const cleared = await activity.state.runner.abort();
+    const discarded = [...cleared.steering, ...cleared.followUp];
+
     await this.adapter.sendMessage(
       chatId,
-      "Task aborted.",
+      discarded.length
+        ? `Task aborted. Discarded queued messages:\n${discarded.map((text) => `• ${text}`).join("\n")}`
+        : "Task aborted.",
       { replyToMessageId },
     );
   }
@@ -437,7 +441,7 @@ export class ChatCommands {
   ): Promise<void> {
     await this.adapter.sendMessage(
       chatId,
-      "Exiting pi-pilot. Docker will restart it if restart policy is enabled.",
+      "Exiting pi-pilot. Automatic restart depends on your configuration.",
       { replyToMessageId },
     );
     setTimeout(() => {
