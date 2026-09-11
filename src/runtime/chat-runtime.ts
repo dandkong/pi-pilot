@@ -35,6 +35,8 @@ export class ChatRuntime {
   private initPromise: Promise<void> | undefined;
   private currentOutput: ReturnType<typeof createTurnStreamSender> | undefined;
   private outputQueue = Promise.resolve();
+  /** Steered messages pi has accepted but not yet injected into the running conversation. */
+  private pendingSteering = 0;
   private readonly commands: ChatCommands;
 
   constructor(
@@ -103,6 +105,7 @@ export class ChatRuntime {
     await this.state.runner.dispose();
     this.state = undefined;
     this.currentOutput = undefined;
+    this.pendingSteering = 0;
   }
 
   private isAllowedUser(userId: string): boolean {
@@ -154,6 +157,10 @@ export class ChatRuntime {
   private async handleRunnerOutput(event: AgentSessionEvent): Promise<void> {
     switch (event.type) {
       case "compaction_start": {
+        // Finalize whatever the agent already streamed, so post-compaction
+        // output starts a new Telegram message instead of being merged into
+        // the pre-compaction one.
+        await this.currentOutput?.breakSegment();
         const target = this.getNotificationTarget("compaction notification");
         if (target) await this.sendCompactionStart(target, event.reason);
         return;
@@ -166,6 +173,10 @@ export class ChatRuntime {
       }
       case "agent_start":
         this.currentOutput = undefined;
+        this.pendingSteering = 0;
+        return;
+      case "queue_update":
+        await this.handleQueueUpdate(event);
         return;
       case "message_update":
         if (event.assistantMessageEvent.type === "text_delta") {
@@ -181,6 +192,24 @@ export class ChatRuntime {
         await output?.finish(extractLastAssistantText(event.messages) || "(no response)");
         await this.drainQueueIfIdle();
       }
+    }
+  }
+
+  /**
+   * pi drains its steering queue when it injects a message into the running
+   * conversation. Break the current output segment at that exact point so
+   * everything produced after the interjection starts a new Telegram message
+   * instead of being merged into the pre-interjection one.
+   */
+  private async handleQueueUpdate(
+    event: Extract<AgentSessionEvent, { type: "queue_update" }>,
+  ): Promise<void> {
+    const queued = event.steering.length + event.followUp.length;
+    const wasQueued = this.pendingSteering > 0;
+    this.pendingSteering = queued;
+
+    if (wasQueued && queued === 0) {
+      await this.currentOutput?.breakSegment();
     }
   }
 
@@ -351,6 +380,15 @@ function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {
       return queue(async () => {
         const output = await switchTo("tool");
         output.append(`${formatToolStart(event)}\n`, { immediate: true });
+      });
+    },
+    breakSegment() {
+      return queue(async () => {
+        if (currentOutput && await currentOutput.finish()) {
+          hasSentSegment = true;
+        }
+        currentOutput = undefined;
+        currentKind = undefined;
       });
     },
     async finish(fallbackText: string) {
