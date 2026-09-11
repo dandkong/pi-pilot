@@ -35,9 +35,6 @@ export type ToolEvent = {
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-/** How a prompt issued while the agent is running is delivered. */
-export type SteerMode = "steer" | "followUp";
-
 export type RunnerOutputCallback = (event: AgentSessionEvent) => void;
 
 export type SessionListItem = {
@@ -130,7 +127,7 @@ class Workspace {
 
   async run(
     prompt: string,
-    options: { streamingBehavior?: SteerMode } = {},
+    options: { streamingBehavior?: "steer" } = {},
   ): Promise<void> {
     const session = await this.getSession();
     // pi only accepts streamingBehavior while a run is in flight; passing it
@@ -383,7 +380,7 @@ export class PiRunner {
 
   async run(
     prompt: string,
-    options: { streamingBehavior?: SteerMode } = {},
+    options: { streamingBehavior?: "steer" } = {},
   ): Promise<void> {
     return (await this.getWorkspace()).run(prompt, options);
   }
