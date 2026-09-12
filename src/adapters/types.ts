@@ -62,6 +62,12 @@ export interface ChatAdapter {
   sendMessage(chatId: string, text: string, options?: SendMessageOptions): Promise<SentMessage[]>;
   editMessage(chatId: string, messageId: string, text: string, options?: EditMessageOptions): Promise<void>;
   startTextStream(chatId: string, options?: SendMessageOptions): Promise<ChatTextStream | undefined>;
+  /**
+   * Minimum delay between two stream updates. Rewriting a persisted message is
+   * rate limited by the transport, so the cadence belongs to the adapter rather
+   * than the runtime.
+   */
+  getStreamUpdateIntervalMs(): number;
   sendTyping(chatId: string): Promise<void>;
   answerCallback(callback: ChatCallback, text?: string): Promise<void>;
   onMessage(handler: (message: ChatMessage) => Promise<void>): void;

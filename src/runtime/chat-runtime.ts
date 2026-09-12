@@ -5,6 +5,7 @@ import type {
   ChatCallback,
   ChatMessage,
   MessageRenderMode,
+  SendMessageOptions,
 } from "../adapters/types.ts";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { logger } from "../logger.ts";
@@ -405,16 +406,21 @@ function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget, render
   let streamStarted = false;
   let pending = Promise.resolve();
   let scheduled: Timer | undefined;
-  const minUpdateIntervalMs = 800;
-  let lastUpdatedAt = 0;
+  const streamOptions: SendMessageOptions = {
+    render,
+    replyToMessageId: target.replyToMessageId,
+  };
+  // Rewriting a persisted Telegram message is rate limited, so the adapter owns
+  // the cadence instead of the runtime hardcoding one.
+  const minUpdateIntervalMs = adapter.getStreamUpdateIntervalMs();
+  // Seed with the creation time so the first flush waits one full interval
+  // rather than firing immediately on the very first token.
+  let lastUpdatedAt = Date.now();
 
   const startStream = async () => {
     if (streamStarted) return stream;
     streamStarted = true;
-    stream = await adapter.startTextStream(target.chatId, {
-      render,
-      replyToMessageId: target.replyToMessageId,
-    });
+    stream = await adapter.startTextStream(target.chatId, streamOptions);
     return stream;
   };
 
@@ -434,15 +440,17 @@ function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget, render
 
   const scheduleUpdate = () => {
     if (scheduled) return;
+    // Sleep exactly until the next update becomes legal. A fixed retry tick
+    // would silently cap the adapter's interval at the tick length.
+    const delay = Math.max(0, minUpdateIntervalMs - (Date.now() - lastUpdatedAt));
     scheduled = setTimeout(() => {
       scheduled = undefined;
-      const now = Date.now();
-      if (now - lastUpdatedAt < minUpdateIntervalMs) {
+      if (Date.now() - lastUpdatedAt < minUpdateIntervalMs) {
         scheduleUpdate();
         return;
       }
       update();
-    }, 250);
+    }, delay);
   };
 
   return {

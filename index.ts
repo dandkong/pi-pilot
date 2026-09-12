@@ -38,7 +38,9 @@ const [{ TelegramAdapter }, { CHAT_COMMANDS }, { ChatRuntime }] = await Promise.
   import("./src/runtime/chat-commands.ts"),
   import("./src/runtime/chat-runtime.ts"),
 ]);
-const adapter = new TelegramAdapter(config.telegramToken, CHAT_COMMANDS);
+const adapter = new TelegramAdapter(config.telegramToken, CHAT_COMMANDS, {
+  streamIntervalMs: config.streamIntervalMs,
+});
 const runtime = new ChatRuntime(config, adapter, {
   onExitRequest: () => shutdown("/exit", true),
 });
