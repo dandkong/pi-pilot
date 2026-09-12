@@ -6,8 +6,7 @@ export type ConfigKey =
   | "workspaces"
   | "allowedTelegramUsers"
   | "defaultTelegramChatId"
-  | "logLevel"
-  | "streamIntervalMs";
+  | "logLevel";
 export type ConfigOverrides = Partial<Record<ConfigKey, string>>;
 export type ResolvedConfigValues = Partial<Record<ConfigKey, string>>;
 
@@ -63,19 +62,6 @@ export const CONFIG_DEFINITIONS: readonly ConfigDefinition[] = [
       if (!isLogLevel(value)) throw new Error(`Invalid PI_PILOT_LOG_LEVEL: ${value}. Use ${LOG_LEVELS.join(", ")}.`);
     },
   },
-  {
-    key: "streamIntervalMs",
-    env: "PI_PILOT_STREAM_INTERVAL_MS",
-    flags: ["--stream-interval-ms"],
-    valueName: "ms",
-    description: "Minimum delay between Telegram stream message edits, in milliseconds",
-    defaultValue: () => "800",
-    validate: (value) => {
-      if (!isStreamIntervalMs(value)) {
-        throw new Error(`Invalid PI_PILOT_STREAM_INTERVAL_MS: ${value}. Use an integer between ${MIN_STREAM_INTERVAL_MS} and ${MAX_STREAM_INTERVAL_MS}.`);
-      }
-    },
-  },
 ];
 
 export function createFlagMap(): Record<string, ConfigKey> {
@@ -115,19 +101,6 @@ export function formatConfigHelpRows(): string[] {
 
 export function isLogLevel(value: string): value is LogLevel {
   return LOG_LEVELS.includes(value as LogLevel);
-}
-
-/**
- * Rewriting a persisted Telegram message is rate limited, so the refresh cadence
- * has a usable range: too fast trips flood limits, too slow falls back to visible
- * stepping.
- */
-export const MIN_STREAM_INTERVAL_MS = 50;
-export const MAX_STREAM_INTERVAL_MS = 5_000;
-
-export function isStreamIntervalMs(value: string): boolean {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= MIN_STREAM_INTERVAL_MS && parsed <= MAX_STREAM_INTERVAL_MS;
 }
 
 function readConfigValue(definition: ConfigDefinition, overrides: ConfigOverrides): string | undefined {

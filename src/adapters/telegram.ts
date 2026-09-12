@@ -33,11 +33,6 @@ type MediaGroupState = {
   timer: Timer;
 };
 
-export type TelegramAdapterOptions = {
-  /** Overrides the stream refresh cadence; defaults to STREAM_INTERVAL_MS. */
-  streamIntervalMs?: number;
-};
-
 export class TelegramAdapter implements ChatAdapter {
   private readonly bot: Bot;
   private readonly messageHandlers: Array<(message: ChatMessage) => Promise<void>> = [];
@@ -46,14 +41,8 @@ export class TelegramAdapter implements ChatAdapter {
   private started = false;
 
   private readonly tmpDir: string;
-  private readonly streamIntervalMs: number;
 
-  constructor(
-    token: string,
-    private readonly commands: ChatCommand[] = [],
-    options: TelegramAdapterOptions = {},
-  ) {
-    this.streamIntervalMs = options.streamIntervalMs ?? STREAM_INTERVAL_MS;
+  constructor(token: string, private readonly commands: ChatCommand[] = []) {
     this.bot = new Bot(token);
     this.tmpDir = join(tmpdir(), "pi-pilot");
     mkdirSync(this.tmpDir, { recursive: true });
@@ -163,7 +152,7 @@ export class TelegramAdapter implements ChatAdapter {
   }
 
   getStreamUpdateIntervalMs(): number {
-    return this.streamIntervalMs;
+    return STREAM_INTERVAL_MS;
   }
 
   async startTextStream(chatId: string, options?: SendMessageOptions): Promise<ChatTextStream | undefined> {

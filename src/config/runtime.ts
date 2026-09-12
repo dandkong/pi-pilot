@@ -8,7 +8,6 @@ export type RuntimeConfig = {
   allowedActorIds: string[];
   defaultTargetId?: string;
   logLevel: LogLevel;
-  streamIntervalMs: number;
 };
 
 export function loadConfig(overrides: ConfigOverrides = {}): RuntimeConfig {
@@ -21,7 +20,6 @@ export function loadConfig(overrides: ConfigOverrides = {}): RuntimeConfig {
     allowedActorIds: parseList(values.allowedTelegramUsers),
     defaultTargetId: values.defaultTelegramChatId,
     logLevel: requiredValue(values.logLevel, "PI_PILOT_LOG_LEVEL") as LogLevel,
-    streamIntervalMs: Number(requiredValue(values.streamIntervalMs, "PI_PILOT_STREAM_INTERVAL_MS")),
   };
 }
 
