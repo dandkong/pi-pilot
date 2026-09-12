@@ -275,7 +275,7 @@ export class ChatRuntime {
 
     try {
       await state.runner.run(prompt, { streamingBehavior: "steer" });
-      await this.sendQueued(message, "⚡ Steered.");
+      await this.sendQueued(message, "Steered.");
     } catch (error) {
       // Steering can lose the race with the end of a run; fall back to the
       // local queue instead of dropping the message.
