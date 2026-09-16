@@ -27,6 +27,8 @@ type ChatTarget = {
   replyToMessageId?: string;
 };
 
+type AgentEndEvent = Extract<AgentSessionEvent, { type: "agent_end" }>;
+
 export type ChatRuntimeOptions = {
   onExitRequest?: () => Promise<void> | void;
 };
@@ -36,6 +38,8 @@ export class ChatRuntime {
   private initPromise: Promise<void> | undefined;
   private currentOutput: ReturnType<typeof createTurnStreamSender> | undefined;
   private outputQueue = Promise.resolve();
+  private pendingAgentEnd: AgentEndEvent | undefined;
+  private queueDrainTimer: Timer | undefined;
   /** Steered messages pi has accepted but not yet injected into the running conversation. */
   private pendingSteering = 0;
   private readonly commands: ChatCommands;
@@ -103,9 +107,14 @@ export class ChatRuntime {
   async dispose(): Promise<void> {
     if (!this.state) return;
     this.state.queue.length = 0;
+    if (this.queueDrainTimer) {
+      clearTimeout(this.queueDrainTimer);
+      this.queueDrainTimer = undefined;
+    }
     await this.state.runner.dispose();
     this.state = undefined;
     this.currentOutput = undefined;
+    this.pendingAgentEnd = undefined;
     this.pendingSteering = 0;
   }
 
@@ -169,11 +178,17 @@ export class ChatRuntime {
       case "compaction_end": {
         const target = this.getNotificationTarget("compaction notification");
         if (target) await this.sendCompactionEnd(target, event);
-        if (!event.willRetry) await this.drainQueueIfIdle();
+        // Manual compaction has no agent_settled event; the busy check keeps
+        // auto-compaction from dispatching before its surrounding run settles.
+        if (!event.willRetry) this.requestQueueDrain();
         return;
       }
       case "agent_start":
+        // A new agent loop can follow a retry or compaction. Close any text
+        // from the preceding attempt before the new attempt starts.
+        await this.currentOutput?.breakSegment();
         this.currentOutput = undefined;
+        this.pendingAgentEnd = undefined;
         this.pendingSteering = 0;
         return;
       case "queue_update":
@@ -187,11 +202,22 @@ export class ChatRuntime {
       case "tool_execution_start":
         await this.getOrCreateOutput()?.pushToolStart(event);
         return;
-      case "agent_end": {
-        const output = this.currentOutput ?? this.getOrCreateOutput();
+      case "agent_end":
+        // agent_end can be followed by an automatic retry or compaction. Keep
+        // the result as a fallback, but do not publish or drain until Pi says
+        // the complete run has settled.
+        this.pendingAgentEnd = event;
+        return;
+      case "agent_settled": {
+        const agentEnd = this.pendingAgentEnd;
+        this.pendingAgentEnd = undefined;
+        const output = this.currentOutput ?? (agentEnd ? this.getOrCreateOutput() : undefined);
         this.currentOutput = undefined;
-        await output?.finish(extractLastAssistantText(event.messages) || "(no response)");
-        await this.drainQueueIfIdle();
+        await output?.finish(
+          agentEnd ? extractLastAssistantText(agentEnd.messages) || "(no response)" : "",
+        );
+        this.requestQueueDrain();
+        return;
       }
     }
   }
@@ -297,6 +323,20 @@ export class ChatRuntime {
     return status.isStreaming || status.isCompacting || status.pendingMessages > 0;
   }
 
+  private requestQueueDrain(): void {
+    if (this.queueDrainTimer) return;
+
+    // Do not start a new Pi run from inside an output event handler. Waiting
+    // one macrotask lets the current agent_settled/compaction event finish and
+    // avoids making the serialized output queue wait on itself.
+    this.queueDrainTimer = setTimeout(() => {
+      this.queueDrainTimer = undefined;
+      void this.drainQueueIfIdle().catch((error) =>
+        log.error("queued message drain failed", error),
+      );
+    }, 0);
+  }
+
   private async drainQueueIfIdle(): Promise<void> {
     const state = this.state;
     if (state) await this.drainQueue(state);
@@ -328,19 +368,32 @@ export class ChatRuntime {
         );
     }, 4_000);
 
+    let failed = false;
+    let failure: unknown;
     try {
       await this.adapter.sendTyping(message.chatId);
       const prompt = formatPrompt(message.text.trim(), message.attachments);
       await state.runner.run(prompt);
     } catch (error) {
-      log.error(`[chat ${message.chatId}] pi failed`, error);
-      await this.adapter.sendMessage(
-        message.chatId,
-        `Pi failed: ${error instanceof Error ? error.message : String(error)}`,
-        undefined,
-      );
+      failed = true;
+      failure = error;
     } finally {
       clearInterval(typingInterval);
+    }
+
+    // AgentSession emits agent_settled synchronously to subscribers, but
+    // ChatRuntime serializes its output handling asynchronously. Do not let
+    // the FIFO start another run before the settled turn is delivered, even
+    // when the runner reports a final error.
+    await this.outputQueue;
+
+    if (failed) {
+      log.error(`[chat ${message.chatId}] pi failed`, failure);
+      await this.adapter.sendMessage(
+        message.chatId,
+        `Pi failed: ${failure instanceof Error ? failure.message : String(failure)}`,
+        undefined,
+      );
     }
   }
 }
@@ -394,6 +447,10 @@ function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {
     },
     async finish(fallbackText: string) {
       await pending;
+      if (!currentOutput && !hasSentSegment && fallbackText.trim()) {
+        currentKind = "text";
+        currentOutput = createTextStreamSender(adapter, target, "markdown");
+      }
       const sentCurrent = await currentOutput?.finish(hasSentSegment ? "" : fallbackText);
       hasSentSegment = hasSentSegment || !!sentCurrent;
     },
