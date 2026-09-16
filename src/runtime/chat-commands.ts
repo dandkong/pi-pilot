@@ -37,6 +37,7 @@ import {
 
 export const CHAT_COMMANDS: ChatCommand[] = [
   { command: "status", description: "Show current session status" },
+  { command: "compact", description: "Compact context" },
   { command: "workspaces", description: "Switch workspace" },
   { command: "models", description: "Choose model" },
   { command: "thinking", description: "Set thinking level" },
@@ -45,7 +46,6 @@ export const CHAT_COMMANDS: ChatCommand[] = [
   { command: "recent", description: "Show recent session messages" },
   { command: "new", description: "Start a new session" },
   { command: "stop", description: "Abort current task" },
-  { command: "compact", description: "Compact context" },
   { command: "reload", description: "Reload current pi session" },
   { command: "exit", description: "Exit pi-pilot process" },
   { command: "start", description: "Welcome and quick start" },
