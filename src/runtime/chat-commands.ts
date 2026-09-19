@@ -35,21 +35,23 @@ import {
   formatWorkspaceMenu,
 } from "./chat-command-format.ts";
 
+// Order matters: it defines both the Telegram command menu (setMyCommands)
+// and /help output. Keep high-frequency commands first, destructive last.
 export const CHAT_COMMANDS: ChatCommand[] = [
   { command: "status", description: "Show current session status" },
   { command: "compact", description: "Compact context" },
-  { command: "workspaces", description: "Switch workspace" },
   { command: "models", description: "Choose model" },
   { command: "thinking", description: "Set thinking level" },
-  { command: "resume", description: "Resume a previous session" },
-  { command: "delete", description: "Delete a previous session" },
-  { command: "recent", description: "Show recent session messages" },
+  { command: "workspaces", description: "Switch workspace" },
   { command: "new", description: "Start a new session" },
   { command: "stop", description: "Abort current task" },
+  { command: "resume", description: "Resume a previous session" },
+  { command: "recent", description: "Show recent session messages" },
+  { command: "delete", description: "Delete a previous session" },
   { command: "reload", description: "Reload current pi session" },
-  { command: "exit", description: "Exit pi-pilot process" },
-  { command: "start", description: "Welcome and quick start" },
   { command: "help", description: "Show available commands" },
+  { command: "start", description: "Welcome and quick start" },
+  { command: "exit", description: "Exit pi-pilot process" },
 ];
 
 type ActivityState = {

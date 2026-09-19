@@ -22,15 +22,21 @@ For Docker, mount the agent data directory to `/home/bun/.pi/agent`.
 | Command | Description |
 |---------|-------------|
 | `/status` | Show current model, context, session, queue, tools, skills, and cost |
-| `/workspaces` | Switch between configured project directories |
+| `/compact` | Compact conversation context |
 | `/models` | Choose a model with inline buttons |
 | `/thinking` | Set thinking level for the current model |
-| `/resume` | Resume one of the 5 most recent sessions |
+| `/workspaces` | Switch between configured project directories |
 | `/new` | Start a fresh session |
 | `/stop` | Abort the running task and clear queued messages |
-| `/compact` | Compact conversation context |
+| `/resume` | Resume one of the 5 most recent sessions |
+| `/recent` | Show the last few messages of the current session |
+| `/delete` | Delete one of the 5 most recent sessions (current session excluded) |
 | `/reload` | Reload the current pi session and resources |
+| `/help` | List available commands |
+| `/start` | Welcome message and quick start hint |
 | `/exit` | Exit the pi-pilot process |
+
+This order is the source of truth for the Telegram command menu and `/help` output; it comes from `CHAT_COMMANDS` in `src/runtime/chat-commands.ts`.
 
 ## Run from Source
 
