@@ -268,6 +268,12 @@ export class TelegramAdapter implements ChatAdapter {
     await this.bot.api.sendChatAction(chatId, "typing");
   }
 
+  async reactToMessage(chatId: string, messageId: string, emoji: "👀"): Promise<void> {
+    await this.bot.api.setMessageReaction(chatId, Number(messageId), [
+      { type: "emoji", emoji },
+    ]);
+  }
+
   async answerCallback(callback: ChatCallback, text?: string): Promise<void> {
     await this.bot.api.answerCallbackQuery(callback.callbackId, { text });
   }

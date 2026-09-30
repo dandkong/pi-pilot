@@ -69,6 +69,7 @@ export interface ChatAdapter {
    */
   getStreamUpdateIntervalMs(): number;
   sendTyping(chatId: string): Promise<void>;
+  reactToMessage(chatId: string, messageId: string, emoji: "👀"): Promise<void>;
   answerCallback(callback: ChatCallback, text?: string): Promise<void>;
   onMessage(handler: (message: ChatMessage) => Promise<void>): void;
   onCallback(handler: (callback: ChatCallback) => Promise<void>): void;

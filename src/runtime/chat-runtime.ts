@@ -289,7 +289,7 @@ export class ChatRuntime {
     state.queue.push(message);
 
     if (shouldQueue) {
-      await this.sendQueued(message);
+      await this.reactToDeferredMessage(message);
       return;
     }
 
@@ -301,21 +301,25 @@ export class ChatRuntime {
 
     try {
       await state.runner.run(prompt, { streamingBehavior: "steer" });
-      await this.sendQueued(message, "Steered.");
+      await this.reactToDeferredMessage(message);
     } catch (error) {
       // Steering can lose the race with the end of a run; fall back to the
       // local queue instead of dropping the message.
       log.warn(`[chat ${message.chatId}] steer failed, queueing instead`, error);
       state.queue.push(message);
-      await this.sendQueued(message);
+      await this.reactToDeferredMessage(message);
       await this.drainQueueIfIdle();
     }
   }
 
-  private async sendQueued(message: ChatMessage, text = "Queued."): Promise<void> {
-    await this.adapter.sendMessage(message.chatId, text, {
-      replyToMessageId: message.messageId || undefined,
-    });
+  private async reactToDeferredMessage(message: ChatMessage): Promise<void> {
+    if (!message.messageId) return;
+
+    try {
+      await this.adapter.reactToMessage(message.chatId, message.messageId, "👀");
+    } catch (error) {
+      log.warn(`[chat ${message.chatId}] message reaction failed`, error);
+    }
   }
 
   private async isRunnerBusy(state: ChatState): Promise<boolean> {
