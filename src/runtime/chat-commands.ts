@@ -52,7 +52,6 @@ export const CHAT_COMMANDS: ChatCommand[] = [
 type ActivityState = {
   state: ChatState;
   busy: boolean;
-  streaming: boolean;
   compacting: boolean;
   queued: number;
 };
@@ -202,18 +201,20 @@ export class ChatCommands {
     replyToMessageId?: string,
   ): Promise<void> {
     const activity = await this.getActivityState(chatId);
-    if (!activity.busy && !activity.streaming && activity.queued === 0) {
-      await this.adapter.sendMessage(chatId, "Nothing to stop - no task is running.", {
-        replyToMessageId,
-      });
+    if (!isActive(activity)) {
+      await this.adapter.sendMessage(
+        chatId,
+        "Nothing to stop - no task is running.",
+        {
+          replyToMessageId,
+        },
+      );
       return;
     }
     await activity.state.runner.abort();
-    await this.adapter.sendMessage(
-      chatId,
-      "Task aborted.",
-      { replyToMessageId },
-    );
+    await this.adapter.sendMessage(chatId, "Task aborted.", {
+      replyToMessageId,
+    });
   }
 
   private async sendCompact(
@@ -227,7 +228,7 @@ export class ChatCommands {
       });
       return;
     }
-    if (activity.busy || activity.streaming || activity.queued > 0) {
+    if (isActive(activity)) {
       await this.adapter.sendMessage(
         chatId,
         "Cannot compact while a task is running or messages are queued. Use /stop or wait for completion.",
@@ -246,7 +247,9 @@ export class ChatCommands {
     const state = await this.getState();
     const sessions = await state.runner.listSessions();
     if (!sessions.length) {
-      await this.adapter.sendMessage(chatId, "No previous sessions found.", { replyToMessageId });
+      await this.adapter.sendMessage(chatId, "No previous sessions found.", {
+        replyToMessageId,
+      });
       return;
     }
     await this.adapter.sendMessage(chatId, formatResumeMenu(sessions), {
@@ -274,10 +277,14 @@ export class ChatCommands {
     const state = await this.getState();
     const status = await state.runner.getStatus();
     const levels = await state.runner.getAvailableThinkingLevels();
-    await this.adapter.sendMessage(chatId, formatThinkingMenu(levels, status.thinkingLevel, status.model), {
-      replyToMessageId,
-      buttons: thinkingButtons(levels, status.thinkingLevel),
-    });
+    await this.adapter.sendMessage(
+      chatId,
+      formatThinkingMenu(levels, status.thinkingLevel, status.model),
+      {
+        replyToMessageId,
+        buttons: thinkingButtons(levels, status.thinkingLevel),
+      },
+    );
   }
 
   private async sendRecentMessages(
@@ -286,7 +293,9 @@ export class ChatCommands {
   ): Promise<void> {
     const state = await this.getState();
     const messages = await state.runner.getRecentMessages();
-    await this.adapter.sendMessage(chatId, formatRecentMessages(messages), { replyToMessageId });
+    await this.adapter.sendMessage(chatId, formatRecentMessages(messages), {
+      replyToMessageId,
+    });
   }
 
   private async sendNewSession(
@@ -313,13 +322,19 @@ export class ChatCommands {
     const index = Number(rawIndex);
     if (!Number.isInteger(index)) throw new Error("Invalid session index");
 
-    const activity = await this.requireIdleCallback(callback, "Cannot switch session while a task is running");
+    const activity = await this.requireIdleCallback(
+      callback,
+      "Cannot switch session while a task is running",
+    );
     if (!activity) return;
 
     const target = await activity.state.runner.switchSession(index);
     const label = formatSessionLabel(target);
     await this.editCallbackMessage(callback, `Resumed session:\n${label}`, []);
-    await this.adapter.answerCallback(callback, `Resumed ${target.id.slice(0, 8)}`);
+    await this.adapter.answerCallback(
+      callback,
+      `Resumed ${target.id.slice(0, 8)}`,
+    );
   }
 
   private async selectWorkspace(callback: ChatCallback): Promise<void> {
@@ -327,17 +342,26 @@ export class ChatCommands {
     const index = Number(rawIndex);
     if (!Number.isInteger(index)) throw new Error("Invalid workspace index");
 
-    const activity = await this.requireIdleCallback(callback, "Cannot switch workspace while a task is running");
+    const activity = await this.requireIdleCallback(
+      callback,
+      "Cannot switch workspace while a task is running",
+    );
     if (!activity) return;
 
     const workspace = await activity.state.runner.switchWorkspace(index);
-    await this.editCallbackMessage(callback, `Workspace selected:\nWorkspace: ${workspace.cwd}`, []);
+    await this.editCallbackMessage(
+      callback,
+      `Workspace selected:\nWorkspace: ${workspace.cwd}`,
+      [],
+    );
     await this.adapter.answerCallback(callback, "Workspace selected");
     await this.sendStatus(callback.chatId);
   }
 
   private async selectThinkingLevel(callback: ChatCallback): Promise<void> {
-    const level = callback.data.slice(`${THINKING_PREFIX}:`.length) as ThinkingLevel;
+    const level = callback.data.slice(
+      `${THINKING_PREFIX}:`.length,
+    ) as ThinkingLevel;
     // Durable configure() applies to the next request, preserving the in-flight one.
     const state = await this.getState();
     const applied = await state.runner.setThinkingLevel(level);
@@ -363,7 +387,9 @@ export class ChatCommands {
     if (!activity) return;
 
     await activity.state.runner.reload();
-    await this.adapter.sendMessage(chatId, "Reopened durable session.", { replyToMessageId });
+    await this.adapter.sendMessage(chatId, "Reopened durable session.", {
+      replyToMessageId,
+    });
     await this.sendStatus(chatId);
   }
 
@@ -388,7 +414,7 @@ export class ChatCommands {
     const state = await this.getState();
     await this.adapter.sendMessage(
       chatId,
-      formatStatus(await state.runner.getStatus(), 0),
+      formatStatus(await state.runner.getStatus()),
       {
         replyToMessageId,
       },
@@ -402,10 +428,14 @@ export class ChatCommands {
     const state = await this.getState();
     const groups = await state.runner.getProviderModels();
     const status = await state.runner.getStatus();
-    await this.adapter.sendMessage(chatId, formatProviderMenu(groups, status.model, status.thinkingLevel), {
-      replyToMessageId,
-      buttons: providerButtons(groups),
-    });
+    await this.adapter.sendMessage(
+      chatId,
+      formatProviderMenu(groups, status.model, status.thinkingLevel),
+      {
+        replyToMessageId,
+        buttons: providerButtons(groups),
+      },
+    );
   }
 
   private async editModelProviders(callback: ChatCallback): Promise<void> {
@@ -465,8 +495,7 @@ export class ChatCommands {
     const runtimeStatus = await state.runner.getRuntimeStatus();
     return {
       state,
-      busy: runtimeStatus.isStreaming || runtimeStatus.isCompacting,
-      streaming: runtimeStatus.isStreaming,
+      busy: runtimeStatus.isRunning || runtimeStatus.isCompacting,
       compacting: runtimeStatus.isCompacting,
       queued: runtimeStatus.pendingMessages,
     };
@@ -511,7 +540,7 @@ export class ChatCommands {
 }
 
 function isActive(activity: ActivityState): boolean {
-  return activity.busy || activity.streaming || activity.compacting || activity.queued > 0;
+  return activity.busy || activity.queued > 0;
 }
 
 function parseCommand(text: string): string | undefined {

@@ -3,6 +3,9 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/models";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { ConversationId } from "@earendil-works/pi-durable";
+import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
 import {
   fauxAssistantMessage,
   fauxProvider,
@@ -103,18 +106,15 @@ describe("durable runner", () => {
     expect(await readFile(join(workspace, "hello.txt"), "utf8")).toBe(
       "world\n",
     );
-    expect(
-      events
-        .filter((e) => e.type === "message_update")
-        .map((e) => e.assistantMessageEvent.delta)
-        .join(""),
-    ).toBe("Done: world.");
+    expect(events.filter((e) => e.type === "assistant_text").at(-1)?.text).toBe(
+      "Done: world.",
+    );
     expect(
       events.filter((e) => e.type === "tool_execution_start"),
     ).toHaveLength(4);
-    expect(events.at(-1)?.type).toBe("agent_settled");
+    expect(events.at(-1)?.type).toBe("run_finished");
     const status = await runner.getStatus();
-    expect(status.isStreaming).toBe(false);
+    expect(status.isRunning).toBe(false);
     expect(status.stats.toolResults).toBe(4);
     expect(status.activeTools).toEqual(["read", "write", "edit", "bash"]);
   });
@@ -184,16 +184,17 @@ describe("durable runner", () => {
     const running = runner.run("Create a note");
     await waitUntil(() => faux.state.callCount === 1);
     try {
-      await runner.run("Use TypeScript", { streamingBehavior: "steer" });
+      const input = await runner.submit("Use TypeScript", {
+        whenBusy: "steer",
+      });
+      expect(input.queued).toBe(true);
       expect((await runner.getRuntimeStatus()).pendingMessages).toBe(1);
-      expect((await runner.getRuntimeStatus()).isStreaming).toBe(true);
+      expect((await runner.getRuntimeStatus()).isRunning).toBe(true);
     } finally {
       release();
     }
     await running;
-    expect(
-      events.some((e) => e.type === "queue_update" && e.steering.length === 1),
-    ).toBe(true);
+    expect(events.some((e) => e.type === "segment_break")).toBe(true);
     expect((await runner.getRuntimeStatus()).pendingMessages).toBe(0);
   });
 
@@ -204,11 +205,11 @@ describe("durable runner", () => {
     ]);
     const running = runner.run("Work slowly");
     await waitUntil(() => faux.state.callCount === 1);
-    await runner.run("Queued instruction", { streamingBehavior: "steer" });
+    await runner.submit("Queued instruction", { whenBusy: "steer" });
     await runner.abort();
     await running;
     expect(await runner.getRuntimeStatus()).toEqual({
-      isStreaming: false,
+      isRunning: false,
       isCompacting: false,
       pendingMessages: 0,
     });
@@ -227,9 +228,7 @@ describe("durable runner", () => {
     faux.setResponses([fauxAssistantMessage("Recovered.")]);
     const reopened = createRunner();
     await reopened.init();
-    await waitUntil(
-      async () => !(await reopened.getRuntimeStatus()).isStreaming,
-    );
+    await waitUntil(async () => !(await reopened.getRuntimeStatus()).isRunning);
     expect((await reopened.getStatus()).sessionId).toBe(originalId);
     expect((await reopened.getRecentMessages()).at(-1)).toEqual({
       role: "Assistant",
@@ -294,7 +293,7 @@ describe("durable runner", () => {
       const reopened = createRunner();
       await reopened.init();
       await waitUntil(
-        async () => !(await reopened.getRuntimeStatus()).isStreaming,
+        async () => !(await reopened.getRuntimeStatus()).isRunning,
       );
       expect(await reopened.getRecentMessages()).toEqual([
         { role: "User", text: "Persist before crashing" },
@@ -346,5 +345,119 @@ describe("durable runner", () => {
       true,
     );
     expect((await runner.getRuntimeStatus()).isCompacting).toBe(false);
+  });
+
+  test("slow output cannot block busy checks, input admission, or native cancellation", async () => {
+    const { runner, faux, events } = await fixture(10);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    runner.setOutputCallback(async (event) => {
+      events.push(event);
+      if (event.type === "run_started") await gate;
+    });
+    faux.setResponses([
+      fauxAssistantMessage(
+        "This generation must stop before the slow transport recovers.",
+      ),
+    ]);
+    const running = await runner.submit("Start running");
+    try {
+      await waitUntil(
+        () =>
+          events.some((e) => e.type === "run_started") &&
+          faux.state.callCount === 1,
+      );
+      const changes = await Promise.allSettled([
+        runner.newSession(),
+        runner.switchSession(0),
+        runner.switchWorkspace(1),
+        runner.reload(),
+        runner.compact(),
+      ]);
+      expect(
+        changes.every(
+          (result) =>
+            result.status === "rejected" &&
+            String(result.reason).includes("workspace is busy"),
+        ),
+      ).toBe(true);
+      const queued = await runner.submit("Persist a steer", {
+        whenBusy: "steer",
+      });
+      expect(queued.queued).toBe(true);
+      const stopping = runner.abort();
+      await waitUntil(async () => !(await runner.getRuntimeStatus()).isRunning);
+      expect((await runner.getRuntimeStatus()).pendingMessages).toBe(0);
+      // Waiting for transport is outside the operation queue, so status works
+      // even though neither the run's output nor /stop output has drained yet.
+      expect(events.some((e) => e.type === "run_finished")).toBe(false);
+      release();
+      await Promise.all([stopping, running.wait(), queued.wait()]);
+      expect(events.at(-1)?.type).toBe("run_finished");
+    } finally {
+      release();
+    }
+  });
+
+  test("manual compaction waits outside admission so /stop can cancel it", async () => {
+    const { runner, faux, events } = await fixture(10);
+    faux.setResponses([fauxAssistantMessage("OK"), fauxAssistantMessage("OK")]);
+    await runner.run("Old context. ".repeat(10_000));
+    await runner.run("Recent context. ".repeat(6_000));
+    faux.setResponses([
+      fauxAssistantMessage(
+        "A summary that should be interrupted before it finishes streaming.",
+      ),
+    ]);
+    const compacting = runner.compact();
+    await waitUntil(
+      async () =>
+        (await runner.getRuntimeStatus()).isCompacting &&
+        faux.state.callCount === 3,
+    );
+    await runner.abort();
+    await compacting;
+    expect((await runner.getRuntimeStatus()).isCompacting).toBe(false);
+    expect(
+      events.some((event) => event.type === "compaction_end" && event.aborted),
+    ).toBe(true);
+  });
+
+  test("output synchronization adds no presentation entries and idle reattachment does not replay answers", async () => {
+    const { runner, faux, events, createRunner } = await fixture();
+    faux.setResponses([fauxAssistantMessage("Committed answer.")]);
+    await runner.run("One question");
+    await runner.compact();
+    await runner.abort();
+    const session = (await runner.listSessions())[0]!;
+    await runner.dispose();
+    const storage = await openNodeJsonlStorage(
+      session.path,
+      BACKGROUND_CONTEXT,
+    );
+    try {
+      const page = await storage.scanEntries(
+        { conversationId: Number(session.id) as ConversationId },
+        100,
+        undefined,
+        BACKGROUND_CONTEXT,
+      );
+      expect(page.items.map((entry) => entry.kind).sort()).toEqual([
+        "pi.assistant",
+        "pi.system",
+        "pi.user",
+      ]);
+    } finally {
+      await storage.close(BACKGROUND_CONTEXT);
+    }
+    events.length = 0;
+    const reopened = createRunner();
+    await reopened.init();
+    expect(events).toEqual([{ type: "conversation_attached" }]);
+    expect(await reopened.getRecentMessages(1)).toEqual([
+      { role: "Assistant", text: "Committed answer." },
+    ]);
   });
 });

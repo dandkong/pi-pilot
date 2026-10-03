@@ -1,22 +1,13 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { CompactionReason } from "@earendil-works/pi-durable";
 
-/** UI events independent of Pi's coding-agent session API. */
+/** Presentation of committed durable state. Text updates replace a message. */
 export type RunnerEvent =
-  | { type: "agent_start" }
-  | { type: "agent_end"; messages: AssistantMessage[] }
-  | { type: "agent_settled" }
+  | { type: "conversation_attached" }
+  | { type: "run_started"; id: number }
+  | { type: "run_finished"; id: number; emptyAnswer?: boolean }
+  | { type: "assistant_text"; messageId: string; text: string }
   | { type: "segment_break" }
   | { type: "submission_failed"; message: string }
-  | {
-      type: "message_update";
-      assistantMessageEvent: { type: "text_delta"; delta: string };
-    }
-  | {
-      type: "queue_update";
-      steering: readonly number[];
-      followUp: readonly number[];
-    }
   | {
       type: "tool_execution_start";
       toolName: string;

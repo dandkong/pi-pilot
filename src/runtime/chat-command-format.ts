@@ -1,6 +1,15 @@
 import type { ChatCommand } from "../adapters/types.ts";
-import type { ModelInfo, ProviderModels, RecentMessage, RunnerStatus } from "../pi/runner.ts";
-import type { SessionListItem, ThinkingLevel, WorkspaceListItem } from "../pi/runner.ts";
+import type {
+  ModelInfo,
+  ProviderModels,
+  RecentMessage,
+  RunnerStatus,
+} from "../pi/runner.ts";
+import type {
+  SessionListItem,
+  ThinkingLevel,
+  WorkspaceListItem,
+} from "../pi/runner.ts";
 
 export function formatHelp(commands: ChatCommand[]): string {
   return [
@@ -11,7 +20,7 @@ export function formatHelp(commands: ChatCommand[]): string {
   ].join("\n");
 }
 
-export function formatStatus(status: RunnerStatus, queuedMessages: number): string {
+export function formatStatus(status: RunnerStatus): string {
   const model = status.model
     ? formatModelLine(
         status.model.provider,
@@ -35,9 +44,9 @@ export function formatStatus(status: RunnerStatus, queuedMessages: number): stri
     `Context: ${context}`,
     `Workspace: ${status.cwd}`,
     `Session: ${session}`,
-    `Streaming: ${status.isStreaming ? "yes" : "no"}`,
+    `Running: ${status.isRunning ? "yes" : "no"}`,
     `Compacting: ${status.isCompacting ? "yes" : "no"}`,
-    `Queue: ${queuedMessages + status.pendingMessages}`,
+    `Queue: ${status.pendingMessages}`,
     `Messages: ${status.stats.totalMessages} (${status.stats.userMessages} user / ${status.stats.assistantMessages} assistant)`,
     `Tools: ${status.activeTools.length}`,
     `Extensions: ${status.extensionCount}`,
@@ -50,7 +59,8 @@ export function formatProviderMenu(
   currentModel?: ModelInfo,
   thinkingLevel?: string,
 ): string {
-  if (!groups.length) return "No available models. Set a provider API key in the environment and /reload.";
+  if (!groups.length)
+    return "No available models. Set a provider API key in the environment and /reload.";
   const current = currentModel
     ? `Current: ${formatCurrentModel(currentModel, thinkingLevel)}\n\n`
     : "";
@@ -60,8 +70,9 @@ export function formatProviderMenu(
 export function formatWorkspaceMenu(workspaces: WorkspaceListItem[]): string {
   return [
     "Choose workspace:",
-    ...workspaces.map((workspace, index) =>
-      `${index + 1}. ${workspace.cwd}${workspace.current ? " (current)" : ""}`,
+    ...workspaces.map(
+      (workspace, index) =>
+        `${index + 1}. ${workspace.cwd}${workspace.current ? " (current)" : ""}`,
     ),
   ].join("\n");
 }
@@ -87,16 +98,21 @@ export function formatResumeMenu(sessions: SessionListItem[]): string {
 }
 
 export function formatRecentMessages(messages: RecentMessage[]): string {
-  if (!messages.length) return "No recent user, assistant, or summary messages.";
+  if (!messages.length)
+    return "No recent user, assistant, or summary messages.";
   return messages
-    .map((message) => `${recentRoleIcon(message.role)} ${truncate(normalizeRecentText(message.text), 100) ?? ""}`)
+    .map(
+      (message) =>
+        `${recentRoleIcon(message.role)} ${truncate(normalizeRecentText(message.text), 100) ?? ""}`,
+    )
     .join("\n");
 }
 
 export function formatSessionLabel(session: SessionListItem): string {
   const id = session.id.slice(0, 8);
   const msgs = `${session.messageCount} msg${session.messageCount === 1 ? "" : "s"}`;
-  const label = session.name || truncate(session.firstMessage, 40) || "(no messages)";
+  const label =
+    session.name || truncate(session.firstMessage, 40) || "(no messages)";
   const time = formatRelativeTime(session.modified);
   return `${id} • ${msgs} - ${label} • ${time}`;
 }
@@ -113,7 +129,10 @@ export function formatModelLine(
   return `${provider}/${modelName} • ${thinkingLevel}`;
 }
 
-export function formatCurrentModel(model: ModelInfo, thinkingLevel?: string): string {
+export function formatCurrentModel(
+  model: ModelInfo,
+  thinkingLevel?: string,
+): string {
   return thinkingLevel
     ? formatModelLine(model.provider, model.name, thinkingLevel)
     : `${model.provider}/${model.name}`;
