@@ -6,15 +6,12 @@ import type {
   ChatCommand,
 } from "../adapters/types.ts";
 import type { ThinkingLevel } from "../pi/runner.ts";
-import type { SessionListItem } from "../pi/runner.ts";
 import type { ChatState, ChatStateGetter } from "./chat-runtime.ts";
 import {
-  DELETE_PREFIX,
   MODELS_HOME,
   RESUME_PREFIX,
   THINKING_PREFIX,
   WORKSPACE_PREFIX,
-  deleteButtons,
   modelButtons,
   providerButtons,
   resumeButtons,
@@ -22,7 +19,6 @@ import {
   workspaceButtons,
 } from "./chat-command-buttons.ts";
 import {
-  formatDeleteMenu,
   formatHelp,
   formatModelLine,
   formatModelMenu,
@@ -47,8 +43,7 @@ export const CHAT_COMMANDS: ChatCommand[] = [
   { command: "stop", description: "Abort current task" },
   { command: "resume", description: "Resume a previous session" },
   { command: "recent", description: "Show recent session messages" },
-  { command: "delete", description: "Delete a previous session" },
-  { command: "reload", description: "Reload current pi session" },
+  { command: "reload", description: "Reopen durable session" },
   { command: "help", description: "Show available commands" },
   { command: "start", description: "Welcome and quick start" },
   { command: "exit", description: "Exit pi-pilot process" },
@@ -105,11 +100,6 @@ export class ChatCommands {
 
     if (command === "resume") {
       await this.sendResumeMenu(message.chatId, message.messageId);
-      return true;
-    }
-
-    if (command === "delete") {
-      await this.sendDeleteMenu(message.chatId, message.messageId);
       return true;
     }
 
@@ -187,11 +177,6 @@ export class ChatCommands {
         return;
       }
 
-      if (callback.data.startsWith(`${DELETE_PREFIX}:`)) {
-        await this.selectDeleteSession(callback);
-        return;
-      }
-
       if (callback.data.startsWith(`${THINKING_PREFIX}:`)) {
         await this.selectThinkingLevel(callback);
         return;
@@ -223,7 +208,6 @@ export class ChatCommands {
       });
       return;
     }
-    activity.state.queue.length = 0;
     await activity.state.runner.abort();
     await this.adapter.sendMessage(
       chatId,
@@ -269,29 +253,6 @@ export class ChatCommands {
       replyToMessageId,
       buttons: resumeButtons(sessions),
     });
-  }
-
-  private async sendDeleteMenu(
-    chatId: string,
-    replyToMessageId?: string,
-  ): Promise<void> {
-    const state = await this.getState();
-    const sessions = await this.deleteMenuSessions(state);
-    if (!sessions.length) {
-      await this.adapter.sendMessage(chatId, "No sessions to delete.", { replyToMessageId });
-      return;
-    }
-    await this.adapter.sendMessage(chatId, formatDeleteMenu(sessions), {
-      replyToMessageId,
-      buttons: deleteButtons(sessions),
-    });
-  }
-
-  private async deleteMenuSessions(state: ChatState): Promise<SessionListItem[]> {
-    const status = await state.runner.getStatus();
-    return (await state.runner.listSessions()).filter(
-      (session) => session.id !== status.sessionId,
-    );
   }
 
   private async sendWorkspaceMenu(
@@ -361,29 +322,6 @@ export class ChatCommands {
     await this.adapter.answerCallback(callback, `Resumed ${target.id.slice(0, 8)}`);
   }
 
-  private async selectDeleteSession(callback: ChatCallback): Promise<void> {
-    const sessionId = callback.data.slice(`${DELETE_PREFIX}:`.length);
-    if (!sessionId) throw new Error("Invalid session selection");
-
-    const activity = await this.requireIdleCallback(callback, "Cannot delete session while a task is running");
-    if (!activity) return;
-
-    const result = await activity.state.runner.deleteSession(sessionId);
-    if (!result.ok) {
-      await this.adapter.answerCallback(callback, result.reason);
-      return;
-    }
-    const deleted = result.session;
-    const sessions = await this.deleteMenuSessions(activity.state);
-
-    await this.editCallbackMessage(
-      callback,
-      formatDeleteMenu(sessions),
-      deleteButtons(sessions),
-    );
-    await this.adapter.answerCallback(callback, `Deleted ${deleted.id.slice(0, 8)}`);
-  }
-
   private async selectWorkspace(callback: ChatCallback): Promise<void> {
     const rawIndex = callback.data.slice(`${WORKSPACE_PREFIX}:`.length);
     const index = Number(rawIndex);
@@ -399,13 +337,8 @@ export class ChatCommands {
   }
 
   private async selectThinkingLevel(callback: ChatCallback): Promise<void> {
-    // The level always comes from buttons generated via getAvailableThinkingLevels(),
-    // and pi's session clamps unknown values anyway, so no whitelist here.
     const level = callback.data.slice(`${THINKING_PREFIX}:`.length) as ThinkingLevel;
-
-    // No idle guard: pi re-reads model and thinking level at every turn boundary
-    // (see _installAgentNextTurnRefresh), so a change applies from the next turn
-    // and never disturbs the LLM call already in flight.
+    // Durable configure() applies to the next request, preserving the in-flight one.
     const state = await this.getState();
     const applied = await state.runner.setThinkingLevel(level);
     const levels = await state.runner.getAvailableThinkingLevels();
@@ -430,7 +363,7 @@ export class ChatCommands {
     if (!activity) return;
 
     await activity.state.runner.reload();
-    await this.adapter.sendMessage(chatId, "Reloaded current pi session.", { replyToMessageId });
+    await this.adapter.sendMessage(chatId, "Reopened durable session.", { replyToMessageId });
     await this.sendStatus(chatId);
   }
 
@@ -455,7 +388,7 @@ export class ChatCommands {
     const state = await this.getState();
     await this.adapter.sendMessage(
       chatId,
-      formatStatus(await state.runner.getStatus(), state.queue.length),
+      formatStatus(await state.runner.getStatus(), 0),
       {
         replyToMessageId,
       },
@@ -521,9 +454,6 @@ export class ChatCommands {
       [[{ text: "Back to providers", callbackData: MODELS_HOME }]],
     );
 
-    // Offer the thinking level for the freshly selected model as its own message,
-    // so the model menu stays usable. pi clamps the level to the new model's
-    // capabilities, so this menu shows the level actually in effect.
     const levels = await state.runner.getAvailableThinkingLevels();
     if (levels.length > 1) await this.sendThinkingMenu(callback.chatId);
 
@@ -535,10 +465,10 @@ export class ChatCommands {
     const runtimeStatus = await state.runner.getRuntimeStatus();
     return {
       state,
-      busy: state.processingQueue,
+      busy: runtimeStatus.isStreaming || runtimeStatus.isCompacting,
       streaming: runtimeStatus.isStreaming,
       compacting: runtimeStatus.isCompacting,
-      queued: state.queue.length + runtimeStatus.pendingMessages,
+      queued: runtimeStatus.pendingMessages,
     };
   }
 

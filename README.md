@@ -2,26 +2,27 @@
 
 > Pi in your pocket. Create from anywhere.
 
-pi-pilot is a Telegram interface for [pi](https://pi.dev/), bringing coding, research, automation, and anything else you can imagine to Telegram.
+This experimental branch runs pi-pilot on [pi-durable](https://github.com/earendil-works/pi/tree/main/packages/durable) 1.0.1. It uses durable conversations and coding tools directly from Telegram. See [the experiment notes](docs/durable-experiment.md) for the architecture and compatibility changes.
 
 ## Features
 
 - Stream replies and tool activity back to chat
 - Switch workspaces, models, and recent sessions
-- Use pi extensions, skills, prompts, and persisted sessions
+- Persist conversations, inboxes, and unfinished tasks across process restarts
+- Use built-in read, write, edit, and bash tools
 - Docker deployment support
 
 ## Prerequisites
 
-Install and configure [pi](https://pi.dev/) first. pi-pilot reuses its model settings, credentials, sessions, extensions, skills, and prompts.
+Install Bun and configure a model provider API key, for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. A pi CLI installation is no longer required. Windows bash tool execution requires Git Bash (or another bash on PATH).
 
-For Docker, mount the agent data directory to `/home/bun/.pi/agent`.
+Old pi credentials, settings, custom models, sessions, extensions, skills, and prompt templates are not loaded. This branch creates separate data under `~/.pi/pilot/durable` by default. Override it with `PI_PILOT_DATA_DIR` and persist that directory in Docker. The first available model is selected for a new workspace; set `PI_PILOT_MODEL=provider/model-id` to choose one explicitly.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/status` | Show current model, context, session, queue, tools, skills, and cost |
+| `/status` | Show model, context window, session, queue, tools, and cost |
 | `/compact` | Compact conversation context |
 | `/models` | Choose a model with inline buttons |
 | `/thinking` | Set thinking level for the current model |
@@ -30,8 +31,7 @@ For Docker, mount the agent data directory to `/home/bun/.pi/agent`.
 | `/stop` | Abort the running task and clear queued messages |
 | `/resume` | Resume one of the 5 most recent sessions |
 | `/recent` | Show the last few messages of the current session |
-| `/delete` | Delete one of the 5 most recent sessions (current session excluded) |
-| `/reload` | Reload the current pi session and resources |
+| `/reload` | Reopen the current durable session |
 | `/help` | List available commands |
 | `/start` | Welcome message and quick start hint |
 | `/exit` | Exit the pi-pilot process |
@@ -48,6 +48,9 @@ TELEGRAM_ALLOWED_USERS=123456789
 TELEGRAM_DEFAULT_CHAT_ID=123456789
 PI_PILOT_WORKSPACES=/path/to/project,/path/to/other-project
 PI_PILOT_LOG_LEVEL=info
+ANTHROPIC_API_KEY=your-provider-key
+# Optional: PI_PILOT_MODEL=provider/model-id
+# Optional: PI_PILOT_DATA_DIR=/path/to/persistent-data
 ```
 
 Install and start from this repository:
@@ -86,51 +89,27 @@ Available options:
 | `--allowed-users` | `TELEGRAM_ALLOWED_USERS` | Comma-separated Telegram user IDs allowed to interact |
 | `--default-chat-id` | `TELEGRAM_DEFAULT_CHAT_ID` | Default Telegram chat ID for all bot output |
 | `--log-level` | `PI_PILOT_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, or `silent` |
+| `--model` | `PI_PILOT_MODEL` | Initial model for new workspaces (`provider/model-id`) |
+| `--data-dir` | `PI_PILOT_DATA_DIR` | Durable storage directory (default: `~/.pi/pilot/durable`) |
 
 ## Docker
 
-### First-time Setup
-
-After starting the container, run pi inside the container to configure credentials and select a model:
-
-```bash
-docker exec -it pi-pilot pi
-```
-
-### Use the published image
-
-```yaml
-services:
-  pi-pilot:
-    image: dandkong/pi-pilot:latest
-    container_name: pi-pilot
-    restart: unless-stopped
-    working_dir: /workspace
-    environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS}
-      TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID}
-      PI_PILOT_WORKSPACES: /workspace,/workspace-a
-      PI_PILOT_LOG_LEVEL: info
-      TZ: Asia/Shanghai
-    volumes:
-      - /path/to/projects:/workspace
-      - /path/to/pi:/home/bun/.pi
-```
-
-### Build locally
-
-Build an image from this repository:
-
-```bash
-docker build -t pi-pilot .
-```
-
-Or use the included local compose file:
+Build this experimental branch locally; the published `latest` image tracks main.
+Set the Telegram credentials and your provider API key in `.env`, then run:
 
 ```bash
 cp .env.example .env
 docker compose up --build
+```
+
+The included compose file mounts the project at `/workspace` and stores durable
+state in the `pilot-durable` named volume. `PI_PILOT_DATA_DIR` inside the container
+is `/home/bun/.pi/pilot/durable`. A container restart resumes unfinished work.
+
+To build only the image:
+
+```bash
+docker build -t pi-pilot:durable .
 ```
 
 ## Workspaces

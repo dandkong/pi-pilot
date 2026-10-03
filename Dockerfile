@@ -5,7 +5,7 @@ FROM oven/bun:latest
 COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=uv /uvx /usr/local/bin/uvx
 
-# pi-coding-agent/undici require a recent Node.js runtime.
+# pi-ai provider SDKs require a recent Node.js runtime.
 # Install Node.js 24 from NodeSource instead of Debian's default nodejs package.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -30,7 +30,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 COPY . .
-RUN ln -s /app/node_modules/.bin/pi /usr/local/bin/pi && chown -R bun:bun /app
+RUN mkdir -p /home/bun/.pi/pilot/durable && chown -R bun:bun /app /home/bun/.pi
 
 USER bun
 

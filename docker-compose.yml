@@ -12,6 +12,10 @@ services:
       TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID:-}
       PI_PILOT_WORKSPACES: ${PI_PILOT_WORKSPACES:-/workspace}
       PI_PILOT_LOG_LEVEL: ${PI_PILOT_LOG_LEVEL:-info}
+      PI_PILOT_DATA_DIR: /home/bun/.pi/pilot/durable
     volumes:
       - .:/workspace
-      - ${HOME}/.pi/agent:/home/bun/.pi/agent
+      - pilot-durable:/home/bun/.pi/pilot/durable
+
+volumes:
+  pilot-durable:

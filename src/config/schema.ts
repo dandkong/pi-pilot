@@ -6,6 +6,8 @@ export type ConfigKey =
   | "workspaces"
   | "allowedTelegramUsers"
   | "defaultTelegramChatId"
+  | "dataDir"
+  | "model"
   | "logLevel";
 export type ConfigOverrides = Partial<Record<ConfigKey, string>>;
 export type ResolvedConfigValues = Partial<Record<ConfigKey, string>>;
@@ -22,6 +24,23 @@ type ConfigDefinition = {
 };
 
 export const CONFIG_DEFINITIONS: readonly ConfigDefinition[] = [
+  {
+    key: "dataDir",
+    env: "PI_PILOT_DATA_DIR",
+    flags: ["--data-dir"],
+    valueName: "path",
+    description: "Durable data directory (default: ~/.pi/pilot/durable)",
+  },
+  {
+    key: "model",
+    env: "PI_PILOT_MODEL",
+    flags: ["--model"],
+    valueName: "provider/model-id",
+    description: "Initial model for new workspaces",
+    validate: (value) => {
+      if (!/^[^/]+\/.+$/.test(value)) throw new Error("PI_PILOT_MODEL must be provider/model-id.");
+    },
+  },
   {
     key: "telegramToken",
     env: "TELEGRAM_BOT_TOKEN",

@@ -8,6 +8,8 @@ export type RuntimeConfig = {
   allowedActorIds: string[];
   defaultTargetId?: string;
   logLevel: LogLevel;
+  dataDir?: string;
+  model?: string;
 };
 
 export function loadConfig(overrides: ConfigOverrides = {}): RuntimeConfig {
@@ -19,6 +21,8 @@ export function loadConfig(overrides: ConfigOverrides = {}): RuntimeConfig {
     workspaces: parseWorkspaces(values.workspaces),
     allowedActorIds: parseList(values.allowedTelegramUsers),
     defaultTargetId: values.defaultTelegramChatId,
+    dataDir: values.dataDir ? resolve(values.dataDir) : undefined,
+    model: values.model,
     logLevel: requiredValue(values.logLevel, "PI_PILOT_LOG_LEVEL") as LogLevel,
   };
 }

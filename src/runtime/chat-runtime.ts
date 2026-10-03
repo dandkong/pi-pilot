@@ -7,7 +7,7 @@ import type {
   MessageRenderMode,
   SendMessageOptions,
 } from "../adapters/types.ts";
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { RunnerEvent } from "../pi/events.ts";
 import { logger } from "../logger.ts";
 import { PiRunner, type ToolEvent } from "../pi/runner.ts";
 import { ChatCommands } from "./chat-commands.ts";
@@ -16,8 +16,6 @@ const log = logger.child("runtime");
 
 export type ChatState = {
   runner: PiRunner;
-  processingQueue: boolean;
-  queue: ChatMessage[];
 };
 
 export type ChatStateGetter = () => Promise<ChatState>;
@@ -27,10 +25,11 @@ type ChatTarget = {
   replyToMessageId?: string;
 };
 
-type AgentEndEvent = Extract<AgentSessionEvent, { type: "agent_end" }>;
+type AgentEndEvent = Extract<RunnerEvent, { type: "agent_end" }>;
 
 export type ChatRuntimeOptions = {
   onExitRequest?: () => Promise<void> | void;
+  runner?: PiRunner;
 };
 
 export class ChatRuntime {
@@ -39,16 +38,18 @@ export class ChatRuntime {
   private currentOutput: ReturnType<typeof createTurnStreamSender> | undefined;
   private outputQueue = Promise.resolve();
   private pendingAgentEnd: AgentEndEvent | undefined;
-  private queueDrainTimer: Timer | undefined;
+  private typingTimer: Timer | undefined;
   /** Steered messages pi has accepted but not yet injected into the running conversation. */
   private pendingSteering = 0;
   private readonly commands: ChatCommands;
+  private readonly runner: PiRunner;
 
   constructor(
     private readonly config: RuntimeConfig,
     private readonly adapter: ChatAdapter,
     options: ChatRuntimeOptions = {},
   ) {
+    this.runner = options.runner ?? new PiRunner(config);
     this.commands = new ChatCommands(
       adapter,
       () => this.getState(),
@@ -77,7 +78,7 @@ export class ChatRuntime {
     const prompt = formatPrompt(message.text.trim(), message.attachments);
     if (!prompt) return;
 
-    await this.enqueueMessage(routedMessage);
+    await this.enqueueMessage(routedMessage, `telegram:${message.chatId}:${message.messageId}`);
   }
 
   async handleCallback(callback: ChatCallback): Promise<void> {
@@ -106,11 +107,7 @@ export class ChatRuntime {
 
   async dispose(): Promise<void> {
     if (!this.state) return;
-    this.state.queue.length = 0;
-    if (this.queueDrainTimer) {
-      clearTimeout(this.queueDrainTimer);
-      this.queueDrainTimer = undefined;
-    }
+    this.stopTyping();
     await this.state.runner.dispose();
     this.state = undefined;
     this.currentOutput = undefined;
@@ -151,21 +148,30 @@ export class ChatRuntime {
   }
 
   private async initializeState(): Promise<void> {
-    const runner = new PiRunner(this.config);
-    const state = { runner, processingQueue: false, queue: [] };
+    const runner = this.runner;
+    const state = { runner };
 
     runner.setOutputCallback((event) => {
       this.outputQueue = this.outputQueue
         .then(() => this.handleRunnerOutput(event))
         .catch((error) => log.error("runner output handling failed", error));
+      return this.outputQueue;
     });
 
     await runner.init();
     this.state = state;
   }
 
-  private async handleRunnerOutput(event: AgentSessionEvent): Promise<void> {
+  private async handleRunnerOutput(event: RunnerEvent): Promise<void> {
     switch (event.type) {
+      case "submission_failed": {
+        const target = this.getNotificationTarget("submission failure");
+        if (target) await this.adapter.sendMessage(target.chatId, `Pi failed: ${event.message}`);
+        return;
+      }
+      case "segment_break":
+        await this.currentOutput?.breakSegment();
+        return;
       case "compaction_start": {
         // Finalize whatever the agent already streamed, so post-compaction
         // output starts a new Telegram message instead of being merged into
@@ -178,12 +184,10 @@ export class ChatRuntime {
       case "compaction_end": {
         const target = this.getNotificationTarget("compaction notification");
         if (target) await this.sendCompactionEnd(target, event);
-        // Manual compaction has no agent_settled event; the busy check keeps
-        // auto-compaction from dispatching before its surrounding run settles.
-        if (!event.willRetry) this.requestQueueDrain();
         return;
       }
       case "agent_start":
+        this.startTyping();
         // A new agent loop can follow a retry or compaction. Close any text
         // from the preceding attempt before the new attempt starts.
         await this.currentOutput?.breakSegment();
@@ -203,9 +207,7 @@ export class ChatRuntime {
         await this.getOrCreateOutput()?.pushToolStart(event);
         return;
       case "agent_end":
-        // agent_end can be followed by an automatic retry or compaction. Keep
-        // the result as a fallback, but do not publish or drain until Pi says
-        // the complete run has settled.
+        // The durable adapter emits this only once the run is terminal.
         this.pendingAgentEnd = event;
         return;
       case "agent_settled": {
@@ -214,9 +216,10 @@ export class ChatRuntime {
         const output = this.currentOutput ?? (agentEnd ? this.getOrCreateOutput() : undefined);
         this.currentOutput = undefined;
         await output?.finish(
-          agentEnd ? extractLastAssistantText(agentEnd.messages) || "(no response)" : "",
+          agentEnd ? extractLastAssistantText(agentEnd.messages) ||
+            (agentEnd.messages.some((message) => message.stopReason === "stop" || message.stopReason === "length") ? "(no response)" : "") : "",
         );
-        this.requestQueueDrain();
+        this.stopTyping();
         return;
       }
     }
@@ -229,7 +232,7 @@ export class ChatRuntime {
    * instead of being merged into the pre-interjection one.
    */
   private async handleQueueUpdate(
-    event: Extract<AgentSessionEvent, { type: "queue_update" }>,
+    event: Extract<RunnerEvent, { type: "queue_update" }>,
   ): Promise<void> {
     const queued = event.steering.length + event.followUp.length;
     const wasQueued = this.pendingSteering > 0;
@@ -261,7 +264,7 @@ export class ChatRuntime {
     await this.adapter.sendMessage(target.chatId, `🔄 Compacting context (${label})...`);
   }
 
-  private async sendCompactionEnd(target: ChatTarget, event: Extract<AgentSessionEvent, { type: "compaction_end" }>): Promise<void> {
+  private async sendCompactionEnd(target: ChatTarget, event: Extract<RunnerEvent, { type: "compaction_end" }>): Promise<void> {
     if (event.aborted) {
       await this.adapter.sendMessage(target.chatId, "⚠️ Compaction aborted.");
       return;
@@ -270,136 +273,47 @@ export class ChatRuntime {
       await this.adapter.sendMessage(target.chatId, `❌ Compaction failed: ${event.errorMessage}`);
       return;
     }
+    if (event.skipped) {
+      await this.adapter.sendMessage(target.chatId, "Context is too short to compact.");
+      return;
+    }
     await this.adapter.sendMessage(target.chatId, "✅ Context compacted.");
   }
 
-  private async enqueueMessage(message: ChatMessage): Promise<void> {
+  private async enqueueMessage(message: ChatMessage, requestId: string): Promise<void> {
     const state = await this.getState();
     const status = await state.runner.getRuntimeStatus();
-
-    // Mid-run insertion: a steering message is delivered after the current
-    // assistant turn finishes its tool calls, before the next LLM call.
-    if (status.isStreaming) {
-      await this.submitSteer(message, state);
-      return;
-    }
-
-    const shouldQueue = state.processingQueue || state.queue.length > 0 || await this.isRunnerBusy(state);
-
-    state.queue.push(message);
-
-    if (shouldQueue) {
-      await this.reactToDeferredMessage(message);
-      return;
-    }
-
-    await this.drainQueue(state);
-  }
-
-  private async submitSteer(message: ChatMessage, state: ChatState): Promise<void> {
-    const prompt = formatPrompt(message.text.trim(), message.attachments);
-
+    const deferred = status.isStreaming || status.isCompacting || status.pendingMessages > 0;
     try {
-      await state.runner.run(prompt, { streamingBehavior: "steer" });
-      await this.reactToDeferredMessage(message);
-    } catch (error) {
-      // Steering can lose the race with the end of a run; fall back to the
-      // local queue instead of dropping the message.
-      log.warn(`[chat ${message.chatId}] steer failed, queueing instead`, error);
-      state.queue.push(message);
-      await this.reactToDeferredMessage(message);
-      await this.drainQueueIfIdle();
-    }
-  }
-
-  private async reactToDeferredMessage(message: ChatMessage): Promise<void> {
-    if (!message.messageId) return;
-
-    try {
-      await this.adapter.reactToMessage(message.chatId, message.messageId, "👀");
-    } catch (error) {
-      log.warn(`[chat ${message.chatId}] message reaction failed`, error);
-    }
-  }
-
-  private async isRunnerBusy(state: ChatState): Promise<boolean> {
-    const status = await state.runner.getRuntimeStatus();
-    return status.isStreaming || status.isCompacting || status.pendingMessages > 0;
-  }
-
-  private requestQueueDrain(): void {
-    if (this.queueDrainTimer) return;
-
-    // Do not start a new Pi run from inside an output event handler. Waiting
-    // one macrotask lets the current agent_settled/compaction event finish and
-    // avoids making the serialized output queue wait on itself.
-    this.queueDrainTimer = setTimeout(() => {
-      this.queueDrainTimer = undefined;
-      void this.drainQueueIfIdle().catch((error) =>
-        log.error("queued message drain failed", error),
-      );
-    }, 0);
-  }
-
-  private async drainQueueIfIdle(): Promise<void> {
-    const state = this.state;
-    if (state) await this.drainQueue(state);
-  }
-
-  private async drainQueue(state: ChatState): Promise<void> {
-    if (state.processingQueue || !state.queue.length) return;
-    state.processingQueue = true;
-
-    try {
-      while (state.queue.length) {
-        if (await this.isRunnerBusy(state)) break;
-
-        const next = state.queue.shift();
-        if (!next) continue;
-        await this.submitMessage(next, state);
+      // Every input goes straight to the durable inbox. The harness owns ordering
+      // and steering, including when a run ends during admission.
+      await state.runner.run(formatPrompt(message.text.trim(), message.attachments), {
+        streamingBehavior: "steer", requestId,
+      });
+      if (deferred && message.messageId) {
+        await this.adapter.reactToMessage(message.chatId, message.messageId, "👀")
+          .catch((error) => log.warn("message reaction failed", error));
       }
-    } finally {
-      state.processingQueue = false;
-    }
-  }
-
-  private async submitMessage(message: ChatMessage, state: ChatState): Promise<void> {
-    const typingInterval = setInterval(() => {
-      this.adapter
-        .sendTyping(message.chatId)
-        .catch((error) =>
-          log.warn(`[chat ${message.chatId}] typing failed`, error),
-        );
-    }, 4_000);
-
-    let failed = false;
-    let failure: unknown;
-    try {
-      await this.adapter.sendTyping(message.chatId);
-      const prompt = formatPrompt(message.text.trim(), message.attachments);
-      await state.runner.run(prompt);
     } catch (error) {
-      failed = true;
-      failure = error;
-    } finally {
-      clearInterval(typingInterval);
-    }
-
-    // AgentSession emits agent_settled synchronously to subscribers, but
-    // ChatRuntime serializes its output handling asynchronously. Do not let
-    // the FIFO start another run before the settled turn is delivered, even
-    // when the runner reports a final error.
-    await this.outputQueue;
-
-    if (failed) {
-      log.error(`[chat ${message.chatId}] pi failed`, failure);
-      await this.adapter.sendMessage(
-        message.chatId,
-        `Pi failed: ${failure instanceof Error ? failure.message : String(failure)}`,
-        undefined,
-      );
+      await this.adapter.sendMessage(message.chatId, `Pi failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+
+  private startTyping(): void {
+    this.stopTyping();
+    const send = () => {
+      const target = this.defaultNotificationTarget();
+      if (target) void this.adapter.sendTyping(target.chatId).catch((error) => log.warn("typing failed", error));
+    };
+    send();
+    this.typingTimer = setInterval(send, 4_000);
+  }
+
+  private stopTyping(): void {
+    if (this.typingTimer) clearInterval(this.typingTimer);
+    this.typingTimer = undefined;
+  }
+
 }
 
 function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {

@@ -47,7 +47,7 @@ export function formatHelp(): string {
     return `  ${flags.padEnd(43)} ${definition.description} (${definition.env})`;
   }).join("\n");
 
-  return `Pi Pilot - Telegram bot wrapper for pi coding agent
+  return `Pi Pilot - Experimental Telegram coding bot powered by pi-durable
 
 Usage:
   pi-pilot [options]

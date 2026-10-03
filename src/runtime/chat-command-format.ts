@@ -41,7 +41,6 @@ export function formatStatus(status: RunnerStatus, queuedMessages: number): stri
     `Messages: ${status.stats.totalMessages} (${status.stats.userMessages} user / ${status.stats.assistantMessages} assistant)`,
     `Tools: ${status.activeTools.length}`,
     `Extensions: ${status.extensionCount}`,
-    `Skills: ${status.skillCount}`,
     `Cost: ${cost}`,
   ].join("\n");
 }
@@ -51,7 +50,7 @@ export function formatProviderMenu(
   currentModel?: ModelInfo,
   thinkingLevel?: string,
 ): string {
-  if (!groups.length) return "No available models. Check your pi auth/config.";
+  if (!groups.length) return "No available models. Set a provider API key in the environment and /reload.";
   const current = currentModel
     ? `Current: ${formatCurrentModel(currentModel, thinkingLevel)}\n\n`
     : "";
@@ -85,11 +84,6 @@ export function formatResumeMenu(sessions: SessionListItem[]): string {
     "Resume a session:",
     ...sessions.map((s, index) => `${index + 1}. ${formatSessionLabel(s)}`),
   ].join("\n");
-}
-
-export function formatDeleteMenu(sessions: SessionListItem[]): string {
-  if (!sessions.length) return "No sessions to delete.";
-  return sessions.map((s, index) => `${index + 1}. ${formatSessionLabel(s)}`).join("\n");
 }
 
 export function formatRecentMessages(messages: RecentMessage[]): string {
