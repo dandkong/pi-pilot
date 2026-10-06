@@ -20,7 +20,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # local pi data
 .pi
-/pi-pilot/
+/.pi-pilot/
 .env.development.local
 .env.test.local
 .env.production.local

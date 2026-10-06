@@ -27,7 +27,7 @@ same skill name:
 
 1. `~/.agents/skills/` for user-wide skills.
 2. `.agents/skills/` in ancestor directories, from filesystem root down to cwd.
-3. `<workspace>/pi-pilot/skills/` for workspace-private skills.
+3. `<workspace>/.pi-pilot/skills/` for workspace-private skills.
 
 For example:
 
@@ -38,7 +38,7 @@ D:/Project/workspace/pi-pilot-durable/
 │   └── review/
 │       ├── SKILL.md
 │       └── references/checklist.md
-└── pi-pilot/
+└── .pi-pilot/
     ├── config/
     ├── sessions/
     └── skills/
@@ -46,7 +46,7 @@ D:/Project/workspace/pi-pilot-durable/
 ```
 
 An interoperable skill can be versioned with the project under `.agents/skills`.
-Workspace-private skills live in the ignored `pi-pilot` data directory. Existing
+Workspace-private skills live in the ignored `.pi-pilot` data directory. Existing
 `.pi/skills` directories are not loaded; place the desired skills in one of the
 locations above.
 
@@ -123,10 +123,13 @@ memory; conversations persist extension names. Reinstalling an extension with th
 same name replaces its code for subsequent phases. After a process restart, the
 host must install its extensions again for pending custom tasks to resume.
 
-Pilot currently installs extensions explicitly in `src/pi/harness.ts`. It does not
-yet provide a filesystem plugin loader or plugin installation command. Telegram
-commands and UI remain in the application layer (`ChatCommands`), rather than
-being registered through the old CLI/TUI extension API.
+Pilot automatically loads workspace plugins from `.pi-pilot/extensions` in addition
+to the built-ins in `src/pi/harness.ts`. Entries are `.ts`, `.js`, or `.mjs` files,
+or directories with an `index.ts`, `index.js`, or `index.mjs`; each defaults to an
+Extension object. `/plugins` lists the active plugins and `/reload` validates and
+reloads their code. See [workspace plugins](workspace-plugins.md) for examples.
+Telegram commands and UI remain in the application layer (`ChatCommands`), rather
+than being registered through the old CLI/TUI extension API.
 
 See the [upstream durable extension documentation](https://github.com/earendil-works/pi/tree/main/packages/durable#extensions)
 for task hooks, documents, and per-conversation extension selection.

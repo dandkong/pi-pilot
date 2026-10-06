@@ -12,17 +12,20 @@ This experimental branch runs pi-pilot on [pi-durable](https://github.com/earend
 - Persist conversations, inboxes, and unfinished tasks across process restarts
 - Use built-in read, write, edit, and bash tools
 - Inherit AGENTS.md instructions and discover Agent Skills in `.agents/skills`
+- Load durable plugins from `.pi-pilot/extensions` and refresh them with `/reload`
 - Docker deployment support
 
 ## Prerequisites
 
 Install Bun and configure a model provider API key, for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. A pi CLI installation is no longer required. Windows bash tool execution requires Git Bash (or another bash on PATH).
 
-All persistent data lives under `<workspace>/pi-pilot/`: `config`, `sessions`, and `attachments`. Downloads use `tmp`; exports and file logs are reserved for future features. There is no central data directory or workspace-path hash. Old sessions and global pi configuration are not imported. AGENTS.md and skills are supported; old coding-agent plugins and prompt templates are not loaded.
+All persistent data lives under `<workspace>/.pi-pilot/`: `config`, `sessions`, and `attachments`. Downloads use `tmp`; exports and file logs are reserved for future features. There is no central data directory or workspace-path hash. Old sessions and global pi configuration are not imported. AGENTS.md and skills are supported; old coding-agent plugins and prompt templates are not loaded.
 
 See [skills, instructions, and durable extensions](docs/workspace-resources.md) for directory conventions and the new extension API.
 
 See [workspace configuration](docs/workspace-data-layout.md) for model JSON, credentials, profiles, and reload behavior.
+
+See [workspace plugins](docs/workspace-plugins.md) for entry files, reload behavior, and a runnable example.
 
 ## Commands
 
@@ -39,7 +42,8 @@ See [workspace configuration](docs/workspace-data-layout.md) for model JSON, cre
 | `/resume` | Resume one of the 5 most recent sessions |
 | `/recent` | Show the last few messages of the current session |
 | `/skills` | List skills; explicitly invoke one with `/skill:name task` |
-| `/reload` | Validate and reload workspace model configuration, preserving the current session |
+| `/plugins` | List loaded workspace plugins and their tools |
+| `/reload` | Validate and reload workspace configuration and plugins, preserving the current session |
 | `/help` | List available commands |
 | `/start` | Welcome message and quick start hint |
 | `/exit` | Exit the pi-pilot process |
@@ -48,7 +52,7 @@ This order is the source of truth for the Telegram command menu and `/help` outp
 
 ## Run from Source
 
-Create `<workspace>/pi-pilot/config/.env` using `.env.example`:
+Create `<workspace>/.pi-pilot/config/.env` using `.env.example`:
 
 ```env
 TELEGRAM_BOT_TOKEN=123456:your-token
@@ -101,10 +105,10 @@ Build this experimental branch locally; the published `latest` image tracks main
 Create the configuration under the mounted workspace, then run:
 
 ```bash
-mkdir -p pi-pilot/config
-cp .env.example pi-pilot/config/.env
-cp examples/config/settings.json examples/config/models.json pi-pilot/config/
-# Fill credentials in pi-pilot/config/.env before starting.
+mkdir -p .pi-pilot/config
+cp .env.example .pi-pilot/config/.env
+cp examples/config/settings.json examples/config/models.json .pi-pilot/config/
+# Fill credentials in .pi-pilot/config/.env before starting.
 docker compose up --build
 ```
 

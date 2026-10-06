@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export function workspacePaths(cwd: string) {
-  const root = join(resolve(cwd), "pi-pilot");
+  const root = join(resolve(cwd), ".pi-pilot");
   return {
     root,
     config: join(root, "config"),
@@ -11,6 +11,8 @@ export function workspacePaths(cwd: string) {
     tmp: join(root, "tmp"),
     exports: join(root, "exports"),
     logs: join(root, "logs"),
+    extensions: join(root, "extensions"),
+    skills: join(root, "skills"),
   };
 }
 
@@ -21,6 +23,7 @@ export function initializeWorkspace(cwd: string): void {
     paths.sessions,
     paths.attachments,
     paths.tmp,
+    paths.extensions,
   ])
     mkdirSync(path, { recursive: true });
   try {

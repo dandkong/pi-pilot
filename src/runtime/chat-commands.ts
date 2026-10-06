@@ -45,7 +45,11 @@ export const CHAT_COMMANDS: ChatCommand[] = [
   { command: "resume", description: "Resume a previous session" },
   { command: "recent", description: "Show recent session messages" },
   { command: "skills", description: "List workspace skills" },
-  { command: "reload", description: "Reload workspace model configuration" },
+  { command: "plugins", description: "List loaded workspace plugins" },
+  {
+    command: "reload",
+    description: "Reload workspace configuration and plugins",
+  },
   { command: "help", description: "Show available commands" },
   { command: "start", description: "Welcome and quick start" },
   { command: "exit", description: "Exit pi-pilot process" },
@@ -110,7 +114,7 @@ export class ChatCommands {
                       `/profile ${profile.name}: ${profile.provider}/${profile.model} (${profile.thinking ?? "off"})`,
                   )
                   .join("\n")
-              : "No model profiles configured. Add profiles to pi-pilot/config/settings.json.",
+              : "No model profiles configured. Add profiles to .pi-pilot/config/settings.json.",
             { replyToMessageId: message.messageId, render: "plain" },
           );
         }
@@ -144,6 +148,24 @@ export class ChatCommands {
               )
               .join("\n\n")
           : "No skills found. Add .agents/skills/<name>/SKILL.md to your workspace.",
+        { replyToMessageId: message.messageId, render: "plain" },
+      );
+      return true;
+    }
+
+    if (command === "plugins") {
+      const state = await this.getState();
+      const plugins = await state.runner.getPlugins();
+      await this.adapter.sendMessage(
+        message.chatId,
+        plugins.length
+          ? plugins
+              .map(
+                (plugin) =>
+                  `${plugin.name}\nTools: ${plugin.tools.join(", ") || "none"}`,
+              )
+              .join("\n\n")
+          : "No workspace plugins loaded. Add an Extension to .pi-pilot/extensions and /reload.",
         { replyToMessageId: message.messageId, render: "plain" },
       );
       return true;

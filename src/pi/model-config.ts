@@ -219,7 +219,7 @@ export async function requireAvailableModel(
   );
   if (!model)
     throw new Error(
-      `Model ${profile.provider}/${profile.model} is unavailable. Check its credentials in pi-pilot/config.`,
+      `Model ${profile.provider}/${profile.model} is unavailable. Check its credentials in .pi-pilot/config.`,
     );
   return model;
 }

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -15,6 +15,7 @@ import type {
 } from "../src/adapters/types.ts";
 import { PiRunner } from "../src/pi/runner.ts";
 import { ChatRuntime } from "../src/runtime/chat-runtime.ts";
+import { workspacePaths } from "../src/config/paths.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -88,6 +89,27 @@ async function waitUntil(predicate: () => boolean | Promise<boolean>) {
     await Bun.sleep(10);
   }
 }
+
+test("Telegram reloads workspace plugins and lists them without a model request", async () => {
+  const { runtime, runner, faux, sent, message } = await fixture();
+  await runtime.handleMessage(message("/plugins"));
+  expect(sent.at(-1)?.text).toContain("No workspace plugins loaded");
+  await writeFile(
+    join(
+      workspacePaths(runner.getWorkspaceDirectory()).extensions,
+      "telegram.ts",
+    ),
+    'export default { name: "telegram-test", tools: [{ name: "chat_plugin_tool", description: "Example", parameters: { type: "object", properties: {} }, execute: async () => ({}) }] };',
+  );
+  await runtime.handleMessage(message("/reload", "2"));
+  expect(
+    sent.some((message) => message.text.includes("configuration reloaded")),
+  ).toBe(true);
+  await runtime.handleMessage(message("/plugins", "3"));
+  expect(sent.at(-1)?.text).toContain("telegram-test");
+  expect(sent.at(-1)?.text).toContain("chat_plugin_tool");
+  expect(faux.state.callCount).toBe(0);
+});
 
 test("Telegram streams text and tool segments, redelivered messages do not run twice", async () => {
   const { runtime, faux, sent, message } = await fixture();

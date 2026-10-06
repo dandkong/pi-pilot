@@ -16,7 +16,7 @@ The sibling clone is for investigation; installation does not depend on it.
 pi-ai provider collection. There is no dependency on `pi-coding-agent`.
 
 Each workspace gets a JSONL store under
-`<workspace>/pi-pilot/sessions`. It uses fsync and durable
+`<workspace>/.pi-pilot/sessions`. It uses fsync and durable
 task checkpoints. The `pilot.sessions` document records the selected conversation
 and the conversations created by `/new`, in the same transaction as their creation.
 Workspace switching closes the old store; reopening restores its selected session.
@@ -49,7 +49,7 @@ The registry installs `CodingTools` (`read`, `write`, `edit`, `bash`), the Pilot
 system prompt, and `pilot-resources` for AGENTS.md instructions and skill discovery.
 Resources are refreshed before each model request using durable's prompt sections.
 `WorkspaceExecutionEnv` extends the Node execution environment,
-binding tools to the selected workspace and temporary/spill files to its `pi-pilot/tmp`.
+binding tools to the selected workspace and temporary/spill files to its `.pi-pilot/tmp`.
 Each workspace constructs its own pi-ai Models collection from `config/models.json`,
 `config/auth.json`, and its `.env` authentication context. Built-in catalogs remain
 available; custom OpenAI completions, OpenAI responses and Anthropic messages
@@ -66,6 +66,7 @@ With no credentials, `/models` and `/status` remain available to diagnose setup.
 | `src/config/paths.ts`, `files.ts`, `settings.ts` | Workspace layout, scoped environment, validated configuration |
 | `src/pi/model-config.ts`, `credentials.ts` | Provider/model composition, profiles, request defaults and atomic file credentials |
 | `src/pi/resources.ts` | Ancestor instructions, skill discovery/catalogs, and explicit skill invocation |
+| `src/pi/extensions.ts` | Workspace plugin discovery, fresh local bundles, host dependency resolution and validation |
 | `src/pi/workspace.ts`                         | Workspace store, selected conversation, durable input/control admission, models, and lifecycle |
 | `src/pi/runner.ts`                            | Small application facade; serialize admissions and lifecycle changes                           |
 | `src/pi/conversation-output.ts`               | Committed-state projection, output sequencing, and snapshot coalescing                         |
@@ -130,9 +131,10 @@ separate feature rather than a transcript synchronization marker.
   Stored OAuth credentials can be resolved/refreshed by pi-ai, but interactive
   login commands and dynamic model catalog persistence are not implemented.
 - Old pi extension hooks, prompt templates, and packages are not loaded. Native
-  durable extensions use a Registry and must be installed by the application.
+  durable extensions use a Registry and are loaded from `.pi-pilot/extensions` by
+  the application. `/plugins` lists loaded entries; `/reload` refreshes them.
   AGENTS.md inheritance, `.agents/skills` discovery and workspace-private
-  `pi-pilot/skills` are supported by the application resource extension; `/skills`
+  `.pi-pilot/skills` are supported by the application resource extension; `/skills`
   lists them and `/skill:name task` explicitly invokes one.
 - `/delete` is removed: durable has no conversation deletion API. Histories remain
   in the workspace store.
@@ -140,11 +142,12 @@ separate feature rather than a transcript synchronization marker.
   unknown, because the old SDK's estimator is unavailable. Cost is taken from
   durable's usage ledger, including compaction spend.
 - Attachments remain local file references. The built-in durable read tool does
-  not decode images. Received attachments persist in `pi-pilot/attachments`;
+  not decode images. Received attachments persist in `.pi-pilot/attachments`;
   image understanding remains outside this experiment.
-- `/reload` validates new workspace model configuration before replacing the
-  runtime, then reopens the selected durable conversation and reinstalls the
-  built-in registry. Invalid configuration leaves the existing runtime usable.
+- `/reload` validates new workspace model configuration and a complete registry
+  of built-ins and workspace plugins before replacing the runtime, then reopens
+  the selected durable conversation. Invalid configuration or plugins leave the
+  existing runtime usable. Local helper imports are rebuilt on reload.
 
 ## Validation
 

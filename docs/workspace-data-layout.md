@@ -4,11 +4,11 @@
 
 ## 目录
 
-每个工作区使用 `<workspace>/pi-pilot/`，不再使用集中存储里的工作区路径哈希。
-当前测试工作区对应 `D:/Project/workspace/pi-pilot-durable/pi-pilot/`。
+每个工作区使用 `<workspace>/.pi-pilot/`，不再使用集中存储里的工作区路径哈希。
+当前测试工作区对应 `D:/Project/workspace/pi-pilot-durable/.pi-pilot/`。
 
 ```text
-pi-pilot/
+.pi-pilot/
 ├─ config/
 │  ├─ .env                 # Telegram token、允许用户、模型环境变量等
 │  ├─ settings.json        # 默认模型预设、思考强度、应用及运行时设置
@@ -19,14 +19,16 @@ pi-pilot/
 │  ├─ doc-<id>.jsonl
 │  └─ task-<id>.jsonl       # 由后端按需生成
 ├─ attachments/            # 已接收的 Telegram 附件，长期保留
+├─ extensions/             # 工作区 durable 插件，默认导出 Extension
+├─ skills/                 # 工作区私有技能；也支持项目 .agents/skills
 ├─ tmp/                    # 下载未完成文件、工具输出溢出文件、子进程临时文件
 ├─ exports/                # 按需创建：聊天、计划、测试报告、交接包导出
 └─ logs/                   # 按需创建：启用文件日志后使用
 ```
 
-初期只按实际使用创建 config、sessions、attachments、tmp；其他目录按需创建。
+初始化创建 config、sessions、attachments、tmp、extensions；其他目录按需创建。
 默认仍向终端输出日志。这里只规定未来文件日志的位置，不增加日志系统。
-初始化时在 `pi-pilot/.gitignore` 写入 `*`，配置和数据默认不进入使用者项目的 Git。
+初始化时在 `.pi-pilot/.gitignore` 写入 `*`，配置和数据默认不进入使用者项目的 Git。
 
 ## 配置与状态的职责
 
@@ -67,7 +69,7 @@ settings.json 还支持 compaction、retry 和 stream 设置；模型 request �
 ## 启动与切换工作区
 
 1. 通过启动参数 `--workspaces` 或 `PI_PILOT_WORKSPACES` 定位工作区；均未指定时用启动 cwd。
-2. 从第一个工作区的 `pi-pilot/config` 读取进程启动配置，创建 Telegram 接入。
+2. 从第一个工作区的 `.pi-pilot/config` 读取进程启动配置，创建 Telegram 接入。
 3. 每个工作区分别构造自己的模型配置、凭据视图和 durable 存储。
 4. `/workspaces` 切换工作区时切换模型集合和数据路径；同一机器人进程的 token、允许用户
    等进程配置保持启动时的值。其他工作区的这些启动字段不用于替换正在运行的机器人。
@@ -78,6 +80,8 @@ settings.json 还支持 compaction、retry 和 stream 设置；模型 request �
 apiKey 则覆盖该供应商的认证方式。
 工作区 .env 解析到配置/认证上下文，不通过修改全局 process.env 来切换供应商。
 重载先校验并构造完整配置，成功后在安全边界替换；失败保持当前可用配置并报告具体错误。
+工作区插件也在这个边界预先加载与注册；编译、导入或注册失败时保留当前运行时。
+插件入口与依赖约定见 [工作区插件](workspace-plugins.md)。
 
 PI_PILOT_MODEL、PI_PILOT_DATA_DIR 以及对应 CLI 选项已移除。
 不提供全局/工作区配置继承规则。
@@ -95,7 +99,9 @@ PI_PILOT_MODEL、PI_PILOT_DATA_DIR 以及对应 CLI 选项已移除。
 `D:/Project/workspace/pi-pilot-durable/.pi-pilot-data/workspaces/47b41948aad6fbef1aa10bcc/`。
 
 新运行时直接使用新目录，不自动迁移或读取旧存储。当前测试环境的凭据和启动字段
-转入 `pi-pilot/config/.env`，默认模型转入 settings.json；旧数据保留。
+位于 `.pi-pilot/config`：Telegram 配置在 .env，DeepSeek key 在 auth.json，
+默认模型在 settings.json。测试工作区原有的 pi-pilot 数据目录已整体改名为
+`.pi-pilot`，保留其中的配置和 durable 会话；更早的 .pi-pilot-data 存储仍保留。
 如需人工迁移，必须停止进程，将完整存储复制到尚未初始化的 sessions，不合并 JSONL。
 
 旧会话中的绝对 cwd 和附件引用不因目录迁移而自动重写。当前方案迁移存储位置，

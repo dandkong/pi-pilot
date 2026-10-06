@@ -60,7 +60,7 @@ export function formatProviderMenu(
   thinkingLevel?: string,
 ): string {
   if (!groups.length)
-    return "No available models. Configure credentials in pi-pilot/config/.env or auth.json, then /reload.";
+    return "No available models. Configure credentials in .pi-pilot/config/.env or auth.json, then /reload.";
   const current = currentModel
     ? `Current: ${formatCurrentModel(currentModel, thinkingLevel)}\n\n`
     : "";

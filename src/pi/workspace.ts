@@ -11,6 +11,7 @@ import {
   type ConversationId,
   type Harness,
   type HarnessSettings,
+  type Registry,
   type InboxState,
   type LiveState,
   type UsageState,
@@ -59,6 +60,7 @@ export class DurableWorkspace {
   constructor(
     readonly cwd: string,
     readonly models: Models,
+    private readonly registry: Registry,
     private readonly preferredModel?: ModelProfile,
     private readonly settings: HarnessSettings = {},
   ) {
@@ -85,6 +87,7 @@ export class DurableWorkspace {
       this.cwd,
       this.models,
       this.settings,
+      this.registry,
     );
     this.history = new ConversationHistory(this.harness);
     try {

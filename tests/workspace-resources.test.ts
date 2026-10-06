@@ -60,7 +60,7 @@ test("resource discovery inherits instructions and skills with predictable overr
     skillText("review", "Project version", "PROJECT_BODY"),
   );
   const privatePath = await file(
-    join(cwd, "pi-pilot", "skills", "review", "SKILL.md"),
+    join(cwd, ".pi-pilot", "skills", "review", "SKILL.md"),
     skillText(
       "review",
       "|\n  Private <review> & details\n  Second line",

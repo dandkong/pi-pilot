@@ -8,6 +8,8 @@ import {
 import { DurableWorkspace } from "./workspace.ts";
 import { compareModels } from "./models.ts";
 import { expandSkillPrompt, loadWorkspaceResources } from "./resources.ts";
+import { loadWorkspaceRegistry } from "./harness.ts";
+import type { WorkspaceRegistry } from "./extensions.ts";
 import type {
   AdmittedInput,
   ModelInfo,
@@ -38,6 +40,7 @@ export class PiRunner {
   private readonly injectedModels?: Models;
   private modelConfig?: WorkspaceModelConfig;
   private workspace?: DurableWorkspace;
+  private workspaceRegistry?: WorkspaceRegistry;
   private currentCwd: string;
   private outputCallback?: RunnerOutputCallback;
   private readonly operations = new OperationQueue();
@@ -54,15 +57,25 @@ export class PiRunner {
         this.currentCwd,
         this.injectedModels,
       );
-      this.workspace = new DurableWorkspace(
+      const registry = await loadWorkspaceRegistry(this.currentCwd);
+      const workspace = new DurableWorkspace(
         this.currentCwd,
         loaded.models,
+        registry.registry,
         loaded.defaultModel,
         loaded.harnessSettings,
       );
+      if (this.outputCallback) workspace.setOutputCallback(this.outputCallback);
+      try {
+        await workspace.init();
+      } catch (error) {
+        await workspace.dispose();
+        await registry.dispose();
+        throw error;
+      }
+      this.workspace = workspace;
+      this.workspaceRegistry = registry;
       this.modelConfig = loaded;
-      if (this.outputCallback)
-        this.workspace.setOutputCallback(this.outputCallback);
     }
     await this.workspace.init();
     return this.workspace;
@@ -136,6 +149,15 @@ export class PiRunner {
     return this.operations.run(
       async () => (await loadWorkspaceResources(this.currentCwd)).skills,
     );
+  }
+  async getPlugins() {
+    return this.operations.run(async () => {
+      await this.getWorkspace();
+      return this.workspaceRegistry!.plugins.map((plugin) => ({
+        ...plugin,
+        tools: [...plugin.tools],
+      }));
+    });
   }
   async getProfiles() {
     return this.operations.run(async () => {
@@ -222,38 +244,50 @@ export class PiRunner {
     await this.workspace?.requireIdle();
     // Build and validate before closing the current store; errors leave it usable.
     const loaded = await loadWorkspaceModels(cwd, this.injectedModels);
-    if (cwd === this.currentCwd && this.workspace) {
-      const current = await this.workspace.getStatus();
-      if (current.model)
-        await requireAvailableModel(loaded.models, {
-          provider: current.model.provider,
-          model: current.model.id,
-        });
-    }
-    const previous = this.workspace;
-    const candidate = new DurableWorkspace(
-      cwd,
-      loaded.models,
-      loaded.defaultModel,
-      loaded.harnessSettings,
-    );
-    candidate.setOutputCallback((event) => this.outputCallback?.(event));
-    await previous?.dispose();
+    const registry = await loadWorkspaceRegistry(cwd);
     try {
-      await candidate.init();
+      if (cwd === this.currentCwd && this.workspace) {
+        const current = await this.workspace.getStatus();
+        if (current.model)
+          await requireAvailableModel(loaded.models, {
+            provider: current.model.provider,
+            model: current.model.id,
+          });
+      }
+      const previous = this.workspace;
+      const previousRegistry = this.workspaceRegistry;
+      const candidate = new DurableWorkspace(
+        cwd,
+        loaded.models,
+        registry.registry,
+        loaded.defaultModel,
+        loaded.harnessSettings,
+      );
+      candidate.setOutputCallback((event) => this.outputCallback?.(event));
+      await previous?.dispose();
+      try {
+        await candidate.init();
+      } catch (error) {
+        await candidate.dispose();
+        await previous?.init();
+        throw error;
+      }
+      this.workspace = candidate;
+      this.workspaceRegistry = registry;
+      this.modelConfig = loaded;
+      this.currentCwd = cwd;
+      await previousRegistry?.dispose();
     } catch (error) {
-      await candidate.dispose();
-      await previous?.init();
+      if (this.workspaceRegistry !== registry) await registry.dispose();
       throw error;
     }
-    this.workspace = candidate;
-    this.modelConfig = loaded;
-    this.currentCwd = cwd;
   }
   async dispose(): Promise<void> {
     await this.operations.run(async () => {
       await this.workspace?.dispose();
       this.workspace = undefined;
+      await this.workspaceRegistry?.dispose();
+      this.workspaceRegistry = undefined;
     });
   }
 }

@@ -1,6 +1,6 @@
 # 工作区模型配置
 
-配置目录为 `<workspace>/pi-pilot/config/`。内置供应商与目录来自 pi-ai；pipi
+配置目录为 `<workspace>/.pi-pilot/config/`。内置供应商与目录来自 pi-ai；pipi
 通过自己的配置适配层构造 Models 并注入 durable，不依赖 pi-coding-agent。
 
 ## models.json
