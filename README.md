@@ -2,7 +2,7 @@
 
 > Pi in your pocket. Create from anywhere.
 
-This experimental branch runs pi-pilot on [pi-durable](https://github.com/earendil-works/pi/tree/main/packages/durable) 1.0.1. It uses durable conversations and coding tools directly from Telegram. See [the experiment notes](docs/durable-experiment.md) for the architecture and compatibility changes.
+This experimental branch runs pi-pilot on [pi-durable](https://github.com/earendil-works/pi/tree/main/packages/durable) 1.0.4. It uses durable conversations and coding tools directly from Telegram. See [the experiment notes](docs/durable-experiment.md) for the architecture and compatibility changes.
 
 ## Features
 

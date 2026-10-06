@@ -6,7 +6,7 @@ Branch: `codex/experiment-pi-durable`. Based on pi-pilot `847a0ec` (latest
 The upstream repository was cloned alongside this checkout at
 `D:\Project\Github\Self\pi-upstream`, revision
 `4c6fb7cfe8c538a668726f6f8b3554098c39faee`. The implementation uses published
-`@earendil-works/pi-durable`, `pi-ai`, and `chord` packages, all pinned to `1.0.1`.
+`@earendil-works/pi-durable`, `pi-ai`, and `chord` packages, all pinned to `1.0.4`.
 The sibling clone is for investigation; installation does not depend on it.
 
 ## What changed
@@ -145,7 +145,8 @@ separate feature rather than a transcript synchronization marker.
   durable's usage ledger, including compaction spend.
 - Attachments remain local file references. The built-in durable read tool does
   not decode images. Received attachments persist in `.pi-pilot/attachments`;
-  image understanding remains outside this experiment.
+  image understanding remains outside this experiment. Verified on 2026-10-06
+  against published 1.0.4: reading a PNG still returns `unsupported_image`.
 - `/reload` validates new workspace model configuration and a complete registry
   of built-ins and workspace plugins before replacing the runtime, then reopens
   the selected durable conversation. Invalid configuration or plugins leave the
