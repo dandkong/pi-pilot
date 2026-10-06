@@ -4,18 +4,21 @@ import {
   createRegistry,
   defineExtension,
   Harness,
+  type HarnessSettings,
   section,
 } from "@earendil-works/pi-durable";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { logger } from "../logger.ts";
+import { workspacePaths } from "../config/paths.ts";
+import { WorkspaceExecutionEnv } from "./execution-env.ts";
 
 /** The host's durable registry, execution environment and persistence policy. */
 export async function openWorkspaceHarness(
   directory: string,
   cwd: string,
   models: Models,
+  settings: HarnessSettings = {},
 ): Promise<Harness> {
   const registry = createRegistry();
   registry.install(CodingTools);
@@ -43,8 +46,12 @@ export async function openWorkspaceHarness(
         models,
         registry,
         env: ({ cwd: agentCwd }) =>
-          new NodeExecutionEnv({ cwd: agentCwd ?? cwd }),
-        settings: { toolExecution: "sequential", steeringMode: "all" },
+          new WorkspaceExecutionEnv(agentCwd ?? cwd, workspacePaths(cwd).tmp),
+        settings: {
+          ...settings,
+          toolExecution: "sequential",
+          steeringMode: "all",
+        },
         onReport: (error) => logger.error("durable harness report", error),
       },
       BACKGROUND_CONTEXT,

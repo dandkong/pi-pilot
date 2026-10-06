@@ -33,12 +33,15 @@ try {
   process.exit(1);
 }
 
-const [{ TelegramAdapter }, { CHAT_COMMANDS }, { ChatRuntime }] = await Promise.all([
-  import("./src/adapters/telegram.ts"),
-  import("./src/runtime/chat-commands.ts"),
-  import("./src/runtime/chat-runtime.ts"),
-]);
-const adapter = new TelegramAdapter(config.telegramToken, CHAT_COMMANDS);
+const [{ TelegramAdapter }, { CHAT_COMMANDS }, { ChatRuntime }] =
+  await Promise.all([
+    import("./src/adapters/telegram.ts"),
+    import("./src/runtime/chat-commands.ts"),
+    import("./src/runtime/chat-runtime.ts"),
+  ]);
+const adapter = new TelegramAdapter(config.telegramToken, CHAT_COMMANDS, () =>
+  runtime.getWorkspaceDirectory(),
+);
 const runtime = new ChatRuntime(config, adapter, {
   onExitRequest: () => shutdown("/exit", true),
 });
@@ -51,7 +54,9 @@ const shutdown = async (signal: string, exit = false) => {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`Received ${signal}. Stopping Pi Pilot backend...`);
-  await adapter.stop().catch((error) => console.error("Failed to stop adapter", error));
+  await adapter
+    .stop()
+    .catch((error) => console.error("Failed to stop adapter", error));
   await runtime.dispose();
   if (exit) process.exit(0);
 };
@@ -60,7 +65,9 @@ process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 if (config.allowedActorIds.length === 0) {
-  console.warn("TELEGRAM_ALLOWED_USERS is empty; all Telegram users will be rejected.");
+  console.warn(
+    "TELEGRAM_ALLOWED_USERS is empty; all Telegram users will be rejected.",
+  );
 }
 
 console.log(`Pi Pilot backend started. workspace=${config.workspaces[0]}`);

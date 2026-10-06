@@ -37,13 +37,14 @@ export const CHAT_COMMANDS: ChatCommand[] = [
   { command: "status", description: "Show current session status" },
   { command: "compact", description: "Compact context" },
   { command: "models", description: "Choose model" },
+  { command: "profile", description: "List or select a model profile" },
   { command: "thinking", description: "Set thinking level" },
   { command: "workspaces", description: "Switch workspace" },
   { command: "new", description: "Start a new session" },
   { command: "stop", description: "Abort current task" },
   { command: "resume", description: "Resume a previous session" },
   { command: "recent", description: "Show recent session messages" },
-  { command: "reload", description: "Reopen durable session" },
+  { command: "reload", description: "Reload workspace model configuration" },
   { command: "help", description: "Show available commands" },
   { command: "start", description: "Welcome and quick start" },
   { command: "exit", description: "Exit pi-pilot process" },
@@ -84,6 +85,43 @@ export class ChatCommands {
 
     if (command === "models") {
       await this.sendModelProviders(message.chatId, message.messageId);
+      return true;
+    }
+    if (command === "profile") {
+      const state = await this.getState();
+      const name = message.text.trim().split(/\s+/).slice(1).join(" ");
+      try {
+        if (name) {
+          await state.runner.setProfile(name);
+          await this.adapter.sendMessage(
+            message.chatId,
+            `Model profile selected: ${name}`,
+            { replyToMessageId: message.messageId },
+          );
+        } else {
+          const profiles = await state.runner.getProfiles();
+          await this.adapter.sendMessage(
+            message.chatId,
+            profiles.length
+              ? profiles
+                  .map(
+                    (profile) =>
+                      `/profile ${profile.name}: ${profile.provider}/${profile.model} (${profile.thinking ?? "off"})`,
+                  )
+                  .join("\n")
+              : "No model profiles configured. Add profiles to pi-pilot/config/settings.json.",
+            { replyToMessageId: message.messageId, render: "plain" },
+          );
+        }
+      } catch (error) {
+        await this.adapter.sendMessage(
+          message.chatId,
+          error instanceof Error
+            ? error.message
+            : "Cannot select model profile",
+          { replyToMessageId: message.messageId },
+        );
+      }
       return true;
     }
 
@@ -387,9 +425,13 @@ export class ChatCommands {
     if (!activity) return;
 
     await activity.state.runner.reload();
-    await this.adapter.sendMessage(chatId, "Reopened durable session.", {
-      replyToMessageId,
-    });
+    await this.adapter.sendMessage(
+      chatId,
+      "Workspace configuration reloaded.",
+      {
+        replyToMessageId,
+      },
+    );
     await this.sendStatus(chatId);
   }
 

@@ -62,9 +62,10 @@ export type RecentMessage = {
   role: "User" | "Assistant" | "Summary";
   text: string;
 };
-export type PiRunnerOptions = { models?: Models; dataDir?: string };
+export type PiRunnerOptions = { models?: Models };
 
 export type SubmitOptions = {
+  workspace?: string;
   whenBusy?: "steer" | "followUp" | "reject";
   requestId?: string;
 };

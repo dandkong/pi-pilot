@@ -16,7 +16,7 @@ The sibling clone is for investigation; installation does not depend on it.
 pi-ai provider collection. There is no dependency on `pi-coding-agent`.
 
 Each workspace gets a JSONL store under
-`PI_PILOT_DATA_DIR/workspaces/<hash-of-workspace-path>`. It uses fsync and durable
+`<workspace>/pi-pilot/sessions`. It uses fsync and durable
 task checkpoints. The `pilot.sessions` document records the selected conversation
 and the conversations created by `/new`, in the same transaction as their creation.
 Workspace switching closes the old store; reopening restores its selected session.
@@ -46,11 +46,14 @@ watermarks let awaited operations drain their output; no `pilot.delivery` entrie
 or other UI synchronization records are written to the transcript.
 
 The registry installs `CodingTools` (`read`, `write`, `edit`, `bash`) and the Pilot
-system prompt. `NodeExecutionEnv` binds tool execution to the selected workspace.
-pi-ai's built-in providers resolve credentials from environment variables or their
-native ambient configuration. Models and thinking levels are stored per conversation.
-An optional `PI_PILOT_MODEL=provider/model-id` selects a new workspace's initial
-model; otherwise the first available model, sorted by provider and name, is selected.
+system prompt. `WorkspaceExecutionEnv` extends the Node execution environment,
+binding tools to the selected workspace and temporary/spill files to its `pi-pilot/tmp`.
+Each workspace constructs its own pi-ai Models collection from `config/models.json`,
+`config/auth.json`, and its `.env` authentication context. Built-in catalogs remain
+available; custom OpenAI completions, OpenAI responses and Anthropic messages
+endpoints are supported. Models and thinking levels are stored per conversation.
+`config/settings.json` defines the default profile for new conversations; without
+one, the first available model, sorted by provider and name, is selected.
 With no credentials, `/models` and `/status` remain available to diagnose setup.
 
 ## Architecture after the migration
@@ -58,6 +61,8 @@ With no credentials, `/models` and `/status` remain available to diagnose setup.
 | Module                                        | Responsibility                                                                                 |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `src/pi/harness.ts`                           | Registry, system prompt, execution environment, storage policy, and Harness creation           |
+| `src/config/paths.ts`, `files.ts`, `settings.ts` | Workspace layout, scoped environment, validated configuration |
+| `src/pi/model-config.ts`, `credentials.ts` | Provider/model composition, profiles, request defaults and atomic file credentials |
 | `src/pi/workspace.ts`                         | Workspace store, selected conversation, durable input/control admission, models, and lifecycle |
 | `src/pi/runner.ts`                            | Small application facade; serialize admissions and lifecycle changes                           |
 | `src/pi/conversation-output.ts`               | Committed-state projection, output sequencing, and snapshot coalescing                         |
@@ -117,8 +122,10 @@ separate feature rather than a transcript synchronization marker.
 ## Compatibility intentionally removed
 
 - Old pi JSONL sessions are not imported. `/resume` lists only durable conversations.
-- Old `auth.json`/OAuth login state, `models.json` custom providers, and pi settings
-  are not loaded. Set the appropriate provider API key in the bot environment.
+- Global pi configuration is not loaded. Workspace `config/auth.json`,
+  `models.json`, `.env`, and `settings.json` are loaded by pipi's own adapter.
+  Stored OAuth credentials can be resolved/refreshed by pi-ai, but interactive
+  login commands and dynamic model catalog persistence are not implemented.
 - Old pi extension hooks, skills, prompt templates, packages, and automatic resource
   discovery are not loaded. AGENTS.md files are not automatically added to the prompt.
 - `/delete` is removed: durable has no conversation deletion API. Histories remain
@@ -127,10 +134,11 @@ separate feature rather than a transcript synchronization marker.
   unknown, because the old SDK's estimator is unavailable. Cost is taken from
   durable's usage ledger, including compaction spend.
 - Attachments remain local file references. The built-in durable read tool does
-  not decode images. Media understanding and survival of temporary attachments
-  across an OS reboot are outside this experiment.
-- `/reload` reopens the durable store and reinstalls the built-in registry; it does
-  not reload old pi resources.
+  not decode images. Received attachments persist in `pi-pilot/attachments`;
+  image understanding remains outside this experiment.
+- `/reload` validates new workspace model configuration before replacing the
+  runtime, then reopens the selected durable conversation and reinstalls the
+  built-in registry. Invalid configuration leaves the existing runtime usable.
 
 ## Validation
 

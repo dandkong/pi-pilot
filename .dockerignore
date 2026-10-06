@@ -11,3 +11,4 @@ yarn-error.log*
 *.log
 .pi
 .agents
+/pi-pilot

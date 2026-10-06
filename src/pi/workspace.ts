@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import {
@@ -12,11 +10,15 @@ import {
   type Conversation,
   type ConversationId,
   type Harness,
+  type HarnessSettings,
   type InboxState,
   type LiveState,
   type UsageState,
 } from "@earendil-works/pi-durable";
 import { logger } from "../logger.ts";
+import { initializeWorkspace, workspacePaths } from "../config/paths.ts";
+import type { ModelProfile } from "../config/settings.ts";
+import { requireAvailableModel } from "./model-config.ts";
 import { ConversationOutput } from "./conversation-output.ts";
 import { ConversationHistory } from "./history.ts";
 import { openWorkspaceHarness } from "./harness.ts";
@@ -56,15 +58,11 @@ export class DurableWorkspace {
 
   constructor(
     readonly cwd: string,
-    private readonly models: Models,
-    dataDir: string,
-    private readonly preferredModel?: string,
+    readonly models: Models,
+    private readonly preferredModel?: ModelProfile,
+    private readonly settings: HarnessSettings = {},
   ) {
-    const key = createHash("sha256")
-      .update(process.platform === "win32" ? cwd.toLowerCase() : cwd)
-      .digest("hex")
-      .slice(0, 24);
-    this.storagePath = join(dataDir, "workspaces", key);
+    this.storagePath = workspacePaths(cwd).sessions;
   }
   setOutputCallback(callback: RunnerOutputCallback): void {
     this.outputCallback = callback;
@@ -80,11 +78,13 @@ export class DurableWorkspace {
     }
   }
   private async open(): Promise<void> {
+    initializeWorkspace(this.cwd);
     await mkdir(this.storagePath, { recursive: true });
     this.harness = await openWorkspaceHarness(
       this.storagePath,
       this.cwd,
       this.models,
+      this.settings,
     );
     this.history = new ConversationHistory(this.harness);
     try {
@@ -105,14 +105,23 @@ export class DurableWorkspace {
   }
   private async createConversation(): Promise<Conversation> {
     const previous = await this.conversation?.agent(context);
-    const model = previous?.model ?? (await this.selectInitialModel());
+    const model = this.preferredModel
+      ? await this.selectInitialModel()
+      : (previous?.model ?? (await this.selectInitialModel()));
+    const selected =
+      model && this.models.getModel(model.provider, model.modelId);
+    const thinking =
+      this.preferredModel?.thinking ??
+      (this.preferredModel ? "off" : (previous?.thinkingLevel ?? "off"));
     return this.requireHarness().createConversation(
       {
         ownership: { kind: "ownerless" },
         agent: {
           cwd: this.cwd,
           ...(model ? { model } : {}),
-          thinkingLevel: previous?.thinkingLevel ?? "off",
+          thinkingLevel: selected
+            ? clampThinkingLevel(selected, thinking)
+            : "off",
         },
         init: async (tx, id) => {
           const state = await tx.doc(PilotSessions);
@@ -128,17 +137,11 @@ export class DurableWorkspace {
       compareModels,
     );
     if (this.preferredModel) {
-      const separator = this.preferredModel.indexOf("/");
-      const provider = this.preferredModel.slice(0, separator);
-      const modelId = this.preferredModel.slice(separator + 1);
-      const selected = available.find(
-        (model) => model.provider === provider && model.id === modelId,
+      const selected = await requireAvailableModel(
+        this.models,
+        this.preferredModel,
       );
-      if (separator < 1 || !selected)
-        throw new Error(
-          `PI_PILOT_MODEL is unavailable: ${this.preferredModel}. Configure its provider credentials.`,
-        );
-      return { provider, modelId };
+      return { provider: selected.provider, modelId: selected.id };
     }
     const selected = available[0];
     return selected
@@ -248,6 +251,20 @@ export class DurableWorkspace {
       context,
     );
     return model;
+  }
+  async setProfile(profile: ModelProfile): Promise<void> {
+    await this.init();
+    const model = await requireAvailableModel(this.models, profile);
+    const thinkingLevel = profile.thinking ?? "off";
+    if (!getSupportedThinkingLevels(model).includes(thinkingLevel))
+      throw new Error(`Unsupported thinking level: ${thinkingLevel}`);
+    await this.requireConversation().configure(
+      {
+        model: { provider: profile.provider, modelId: profile.model },
+        thinkingLevel,
+      },
+      context,
+    );
   }
   async getAvailableThinkingLevels(): Promise<ThinkingLevel[]> {
     await this.init();

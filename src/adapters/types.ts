@@ -26,6 +26,7 @@ export type ChatAttachment = {
 };
 
 export type ChatMessage = {
+  workspace?: string;
   platform: ChatPlatform;
   chatId: string;
   messageId: string;
@@ -59,9 +60,21 @@ export type EditMessageOptions = {
 export interface ChatAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
-  sendMessage(chatId: string, text: string, options?: SendMessageOptions): Promise<SentMessage[]>;
-  editMessage(chatId: string, messageId: string, text: string, options?: EditMessageOptions): Promise<void>;
-  startTextStream(chatId: string, options?: SendMessageOptions): Promise<ChatTextStream | undefined>;
+  sendMessage(
+    chatId: string,
+    text: string,
+    options?: SendMessageOptions,
+  ): Promise<SentMessage[]>;
+  editMessage(
+    chatId: string,
+    messageId: string,
+    text: string,
+    options?: EditMessageOptions,
+  ): Promise<void>;
+  startTextStream(
+    chatId: string,
+    options?: SendMessageOptions,
+  ): Promise<ChatTextStream | undefined>;
   /**
    * Minimum delay between two stream updates. Rewriting a persisted message is
    * rate limited by the transport, so the cadence belongs to the adapter rather

@@ -1,0 +1,20 @@
+{
+  "providers": {
+    "local": {
+      "name": "Local OpenAI-compatible server",
+      "api": "openai-completions",
+      "baseUrl": "http://localhost:8080/v1",
+      "keyless": true,
+      "models": [
+        {
+          "id": "local-model",
+          "name": "Local model",
+          "reasoning": false,
+          "contextWindow": 32768,
+          "maxTokens": 4096,
+          "request": { "temperature": 0.2, "maxTokens": 2048 }
+        }
+      ]
+    }
+  }
+}

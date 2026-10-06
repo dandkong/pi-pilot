@@ -6,8 +6,6 @@ export type ConfigKey =
   | "workspaces"
   | "allowedTelegramUsers"
   | "defaultTelegramChatId"
-  | "dataDir"
-  | "model"
   | "logLevel";
 export type ConfigOverrides = Partial<Record<ConfigKey, string>>;
 export type ResolvedConfigValues = Partial<Record<ConfigKey, string>>;
@@ -24,23 +22,6 @@ type ConfigDefinition = {
 };
 
 export const CONFIG_DEFINITIONS: readonly ConfigDefinition[] = [
-  {
-    key: "dataDir",
-    env: "PI_PILOT_DATA_DIR",
-    flags: ["--data-dir"],
-    valueName: "path",
-    description: "Durable data directory (default: ~/.pi/pilot/durable)",
-  },
-  {
-    key: "model",
-    env: "PI_PILOT_MODEL",
-    flags: ["--model"],
-    valueName: "provider/model-id",
-    description: "Initial model for new workspaces",
-    validate: (value) => {
-      if (!/^[^/]+\/.+$/.test(value)) throw new Error("PI_PILOT_MODEL must be provider/model-id.");
-    },
-  },
   {
     key: "telegramToken",
     env: "TELEGRAM_BOT_TOKEN",
@@ -78,7 +59,10 @@ export const CONFIG_DEFINITIONS: readonly ConfigDefinition[] = [
     description: `Log level (${LOG_LEVELS.join("|")})`,
     defaultValue: () => "info",
     validate: (value) => {
-      if (!isLogLevel(value)) throw new Error(`Invalid PI_PILOT_LOG_LEVEL: ${value}. Use ${LOG_LEVELS.join(", ")}.`);
+      if (!isLogLevel(value))
+        throw new Error(
+          `Invalid PI_PILOT_LOG_LEVEL: ${value}. Use ${LOG_LEVELS.join(", ")}.`,
+        );
     },
   },
 ];
@@ -91,15 +75,20 @@ export function createFlagMap(): Record<string, ConfigKey> {
   return flags;
 }
 
-export function resolveConfigValues(overrides: ConfigOverrides = {}): ResolvedConfigValues {
+export function resolveConfigValues(
+  overrides: ConfigOverrides = {},
+  env: Record<string, string | undefined> = process.env,
+): ResolvedConfigValues {
   const values: ResolvedConfigValues = {};
 
   for (const definition of CONFIG_DEFINITIONS) {
-    const value = readConfigValue(definition, overrides);
+    const value = readConfigValue(definition, overrides, env);
     if (!value) {
       if (definition.required) {
         const flag = definition.flags[0];
-        throw new Error(`Missing ${definition.env}. Set it in .env, your shell environment, or pass ${flag}.`);
+        throw new Error(
+          `Missing ${definition.env}. Set it in .env, your shell environment, or pass ${flag}.`,
+        );
       }
       continue;
     }
@@ -113,7 +102,9 @@ export function resolveConfigValues(overrides: ConfigOverrides = {}): ResolvedCo
 
 export function formatConfigHelpRows(): string[] {
   return CONFIG_DEFINITIONS.map((definition) => {
-    const flags = definition.flags.map((flag) => `${flag} <${definition.valueName}>`).join(", ");
+    const flags = definition.flags
+      .map((flag) => `${flag} <${definition.valueName}>`)
+      .join(", ");
     return `${flags} | ${definition.env} | ${definition.description}`;
   });
 }
@@ -122,11 +113,15 @@ export function isLogLevel(value: string): value is LogLevel {
   return LOG_LEVELS.includes(value as LogLevel);
 }
 
-function readConfigValue(definition: ConfigDefinition, overrides: ConfigOverrides): string | undefined {
+function readConfigValue(
+  definition: ConfigDefinition,
+  overrides: ConfigOverrides,
+  env: Record<string, string | undefined>,
+): string | undefined {
   const override = overrides[definition.key]?.trim();
   if (override) return override;
 
-  const envValue = process.env[definition.env]?.trim();
+  const envValue = env[definition.env]?.trim();
   if (envValue) return envValue;
 
   return definition.defaultValue?.();

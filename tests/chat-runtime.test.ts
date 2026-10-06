@@ -34,7 +34,7 @@ async function fixture() {
     defaultTargetId: "-10042",
     logLevel: "silent" as const,
   };
-  const runner = new PiRunner(config, { models, dataDir: join(dir, "data") });
+  const runner = new PiRunner(config, { models });
   const sent: { chatId: string; text: string; options?: SendMessageOptions }[] =
     [];
   const reactions: string[] = [];

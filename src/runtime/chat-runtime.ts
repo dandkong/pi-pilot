@@ -99,6 +99,9 @@ export class ChatRuntime {
       this.initPromise = undefined;
     }
   }
+  getWorkspaceDirectory(): string {
+    return this.runner.getWorkspaceDirectory();
+  }
 
   async dispose(): Promise<void> {
     await this.initPromise;
@@ -220,7 +223,8 @@ export class ChatRuntime {
   }
 
   private getOrCreateOutput():
-    ReturnType<typeof createTurnStreamSender> | undefined {
+    | ReturnType<typeof createTurnStreamSender>
+    | undefined {
     if (this.currentOutput) return this.currentOutput;
 
     const target = this.getNotificationTarget("runner output");
@@ -284,6 +288,7 @@ export class ChatRuntime {
         {
           whenBusy: "steer",
           requestId,
+          workspace: message.workspace,
         },
       );
       if (input.queued && message.messageId) {

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "defaultProfile": "main",
+  "profiles": {
+    "main": {
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "thinking": "off"
+    },
+    "review": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "thinking": "high"
+    }
+  },
+  "logLevel": "info"
+}

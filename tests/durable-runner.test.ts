@@ -48,7 +48,7 @@ async function fixture(tokensPerSecond = 100_000) {
   };
   const events: RunnerEvent[] = [];
   function createRunner() {
-    const runner = new PiRunner(config, { models, dataDir: join(dir, "data") });
+    const runner = new PiRunner(config, { models });
     runner.setOutputCallback((event) => {
       events.push(event);
     });
@@ -260,7 +260,7 @@ describe("durable runner", () => {
       const faux = fauxProvider({ tokensPerSecond: 1 });
       const models = createModels(); models.setProvider(faux.provider);
       faux.setResponses([fauxAssistantMessage('This output should be interrupted by a hard process kill.')]);
-      const runner = new PiRunner(${JSON.stringify(config)}, { models, dataDir: ${JSON.stringify(join(dir, "data"))} });
+      const runner = new PiRunner(${JSON.stringify(config)}, { models });
       await runner.init();
       const running = runner.run('Persist before crashing', { requestId: 'crash-test' });
       while (faux.state.callCount === 0) await Bun.sleep(5);

@@ -1,8 +1,10 @@
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
 import type { Models } from "@earendil-works/pi-ai";
-import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import type { RuntimeConfig } from "../config/runtime.ts";
+import {
+  loadWorkspaceModels,
+  requireAvailableModel,
+  type WorkspaceModelConfig,
+} from "./model-config.ts";
 import { DurableWorkspace } from "./workspace.ts";
 import { compareModels } from "./models.ts";
 import type {
@@ -32,8 +34,8 @@ class OperationQueue {
   }
 }
 export class PiRunner {
-  private readonly models: Models;
-  private readonly dataDir: string;
+  private readonly injectedModels?: Models;
+  private modelConfig?: WorkspaceModelConfig;
   private workspace?: DurableWorkspace;
   private currentCwd: string;
   private outputCallback?: RunnerOutputCallback;
@@ -42,22 +44,22 @@ export class PiRunner {
     private readonly config: RuntimeConfig,
     options: PiRunnerOptions = {},
   ) {
-    this.models = options.models ?? builtinModels();
-    this.dataDir = resolve(
-      options.dataDir ??
-        config.dataDir ??
-        join(homedir(), ".pi", "pilot", "durable"),
-    );
+    this.injectedModels = options.models;
     this.currentCwd = config.workspaces[0] ?? process.cwd();
   }
   private async getWorkspace(): Promise<DurableWorkspace> {
     if (!this.workspace) {
+      const loaded = await loadWorkspaceModels(
+        this.currentCwd,
+        this.injectedModels,
+      );
       this.workspace = new DurableWorkspace(
         this.currentCwd,
-        this.models,
-        this.dataDir,
-        this.config.model,
+        loaded.models,
+        loaded.defaultModel,
+        loaded.harnessSettings,
       );
+      this.modelConfig = loaded;
       if (this.outputCallback)
         this.workspace.setOutputCallback(this.outputCallback);
     }
@@ -77,9 +79,14 @@ export class PiRunner {
     prompt: string,
     options: SubmitOptions = {},
   ): Promise<AdmittedInput> {
-    return this.operations.run(async () =>
-      (await this.getWorkspace()).submit(prompt, options),
-    );
+    return this.operations.run(async () => {
+      const { workspace, ...input } = options;
+      if (workspace && workspace !== this.currentCwd)
+        throw new Error(
+          "Workspace changed while receiving this message. Switch back to its workspace and resend it.",
+        );
+      return (await this.getWorkspace()).submit(prompt, input);
+    });
   }
   async run(prompt: string, options: SubmitOptions = {}): Promise<void> {
     const input = await this.submit(prompt, options);
@@ -101,19 +108,42 @@ export class PiRunner {
     );
   }
   async getProviderModels(): Promise<ProviderModels[]> {
-    const groups = new Map<string, ModelInfo[]>();
-    for (const model of [...(await this.models.getAvailable())].sort(
-      compareModels,
-    )) {
-      const group = groups.get(model.provider) ?? [];
-      group.push(model);
-      groups.set(model.provider, group);
-    }
-    return [...groups].map(([provider, models]) => ({
-      provider,
-      displayName: this.models.getProvider(provider)?.name ?? provider,
-      models,
-    }));
+    return this.operations.run(async () => {
+      const modelsCollection = (await this.getWorkspace()).models;
+      const groups = new Map<string, ModelInfo[]>();
+      for (const model of [...(await modelsCollection.getAvailable())].sort(
+        compareModels,
+      )) {
+        const group = groups.get(model.provider) ?? [];
+        group.push(model);
+        groups.set(model.provider, group);
+      }
+      return [...groups].map(([provider, models]) => ({
+        provider,
+        displayName: modelsCollection.getProvider(provider)?.name ?? provider,
+        models,
+      }));
+    });
+  }
+  getWorkspaceDirectory(): string {
+    return this.currentCwd;
+  }
+  async getProfiles() {
+    return this.operations.run(async () => {
+      await this.getWorkspace();
+      return Object.entries(this.modelConfig!.profiles).map(
+        ([name, profile]) => ({ name, ...profile }),
+      );
+    });
+  }
+  async setProfile(name: string): Promise<void> {
+    await this.operations.run(async () => {
+      const workspace = await this.getWorkspace();
+      const profile = this.modelConfig!.profiles[name];
+      if (!Object.hasOwn(this.modelConfig!.profiles, name) || !profile)
+        throw new Error(`Unknown model profile: ${name}`);
+      await workspace.setProfile(profile);
+    });
   }
   async setModel(provider: string, index: number): Promise<ModelInfo> {
     return this.operations.run(async () =>
@@ -169,22 +199,47 @@ export class PiRunner {
       const cwd = this.config.workspaces[index];
       if (!cwd) throw new Error(`Invalid workspace index: ${index}`);
       if (cwd !== this.currentCwd) {
-        await this.workspace?.requireIdle();
-        await this.workspace?.dispose();
-        this.workspace = undefined;
-        this.currentCwd = cwd;
-        await this.getWorkspace();
+        await this.replaceWorkspace(cwd);
       }
       return { index, cwd, current: true };
     });
   }
   async reload(): Promise<void> {
     await this.operations.run(async () => {
-      await this.workspace?.requireIdle();
-      await this.workspace?.dispose();
-      this.workspace = undefined;
-      await this.getWorkspace();
+      await this.replaceWorkspace(this.currentCwd);
     });
+  }
+  private async replaceWorkspace(cwd: string): Promise<void> {
+    await this.workspace?.requireIdle();
+    // Build and validate before closing the current store; errors leave it usable.
+    const loaded = await loadWorkspaceModels(cwd, this.injectedModels);
+    if (cwd === this.currentCwd && this.workspace) {
+      const current = await this.workspace.getStatus();
+      if (current.model)
+        await requireAvailableModel(loaded.models, {
+          provider: current.model.provider,
+          model: current.model.id,
+        });
+    }
+    const previous = this.workspace;
+    const candidate = new DurableWorkspace(
+      cwd,
+      loaded.models,
+      loaded.defaultModel,
+      loaded.harnessSettings,
+    );
+    candidate.setOutputCallback((event) => this.outputCallback?.(event));
+    await previous?.dispose();
+    try {
+      await candidate.init();
+    } catch (error) {
+      await candidate.dispose();
+      await previous?.init();
+      throw error;
+    }
+    this.workspace = candidate;
+    this.modelConfig = loaded;
+    this.currentCwd = cwd;
   }
   async dispose(): Promise<void> {
     await this.operations.run(async () => {

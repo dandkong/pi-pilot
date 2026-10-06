@@ -30,7 +30,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 COPY . .
-RUN mkdir -p /home/bun/.pi/pilot/durable && chown -R bun:bun /app /home/bun/.pi
+RUN chown -R bun:bun /app
 
 USER bun
 

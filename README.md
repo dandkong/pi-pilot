@@ -8,6 +8,7 @@ This experimental branch runs pi-pilot on [pi-durable](https://github.com/earend
 
 - Stream replies and tool activity back to chat
 - Switch workspaces, models, and recent sessions
+- Configure custom providers and model profiles with workspace JSON files
 - Persist conversations, inboxes, and unfinished tasks across process restarts
 - Use built-in read, write, edit, and bash tools
 - Docker deployment support
@@ -16,7 +17,9 @@ This experimental branch runs pi-pilot on [pi-durable](https://github.com/earend
 
 Install Bun and configure a model provider API key, for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. A pi CLI installation is no longer required. Windows bash tool execution requires Git Bash (or another bash on PATH).
 
-Old pi credentials, settings, custom models, sessions, extensions, skills, and prompt templates are not loaded. This branch creates separate data under `~/.pi/pilot/durable` by default. Override it with `PI_PILOT_DATA_DIR` and persist that directory in Docker. The first available model is selected for a new workspace; set `PI_PILOT_MODEL=provider/model-id` to choose one explicitly.
+All persistent data lives under `<workspace>/pi-pilot/`: `config`, `sessions`, and `attachments`. Downloads use `tmp`; exports and file logs are reserved for future features. There is no central data directory or workspace-path hash. Old sessions and global pi configuration are not imported. Skills, extensions, and prompt templates still need application integration.
+
+See [workspace configuration](docs/workspace-data-layout.md) for model JSON, credentials, profiles, and reload behavior.
 
 ## Commands
 
@@ -25,13 +28,14 @@ Old pi credentials, settings, custom models, sessions, extensions, skills, and p
 | `/status` | Show model, context window, session, queue, tools, and cost |
 | `/compact` | Compact conversation context |
 | `/models` | Choose a model with inline buttons |
+| `/profile [name]` | List model profiles or select one |
 | `/thinking` | Set thinking level for the current model |
 | `/workspaces` | Switch between configured project directories |
 | `/new` | Start a fresh session |
 | `/stop` | Abort the running task and clear queued messages |
 | `/resume` | Resume one of the 5 most recent sessions |
 | `/recent` | Show the last few messages of the current session |
-| `/reload` | Reopen the current durable session |
+| `/reload` | Validate and reload workspace model configuration, preserving the current session |
 | `/help` | List available commands |
 | `/start` | Welcome message and quick start hint |
 | `/exit` | Exit the pi-pilot process |
@@ -40,24 +44,19 @@ This order is the source of truth for the Telegram command menu and `/help` outp
 
 ## Run from Source
 
-Create `.env`:
+Create `<workspace>/pi-pilot/config/.env` using `.env.example`:
 
 ```env
 TELEGRAM_BOT_TOKEN=123456:your-token
 TELEGRAM_ALLOWED_USERS=123456789
-TELEGRAM_DEFAULT_CHAT_ID=123456789
-PI_PILOT_WORKSPACES=/path/to/project,/path/to/other-project
-PI_PILOT_LOG_LEVEL=info
-ANTHROPIC_API_KEY=your-provider-key
-# Optional: PI_PILOT_MODEL=provider/model-id
-# Optional: PI_PILOT_DATA_DIR=/path/to/persistent-data
+DEEPSEEK_API_KEY=your-provider-key
 ```
 
-Install and start from this repository:
+Copy `examples/config/settings.json` and `models.json` into that config directory. The example selects DeepSeek Flash with thinking off; edit settings for another provider/model. Install and start from this repository:
 
 ```bash
 bun install
-bun run start
+bun run start --workspaces /path/to/project
 ```
 
 ## CLI
@@ -89,22 +88,26 @@ Available options:
 | `--allowed-users` | `TELEGRAM_ALLOWED_USERS` | Comma-separated Telegram user IDs allowed to interact |
 | `--default-chat-id` | `TELEGRAM_DEFAULT_CHAT_ID` | Default Telegram chat ID for all bot output |
 | `--log-level` | `PI_PILOT_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, or `silent` |
-| `--model` | `PI_PILOT_MODEL` | Initial model for new workspaces (`provider/model-id`) |
-| `--data-dir` | `PI_PILOT_DATA_DIR` | Durable storage directory (default: `~/.pi/pilot/durable`) |
+
+CLI values take precedence over process environment, then workspace `.env`; `settings.json` supplies the default log level. Workspace discovery uses `--workspaces`, process `PI_PILOT_WORKSPACES`, or startup cwd. Set these before loading workspace configuration. `PI_PILOT_MODEL` and `PI_PILOT_DATA_DIR` are removed; configure model defaults in `settings.json`.
 
 ## Docker
 
 Build this experimental branch locally; the published `latest` image tracks main.
-Set the Telegram credentials and your provider API key in `.env`, then run:
+Create the configuration under the mounted workspace, then run:
 
 ```bash
-cp .env.example .env
+mkdir -p pi-pilot/config
+cp .env.example pi-pilot/config/.env
+cp examples/config/settings.json examples/config/models.json pi-pilot/config/
+# Fill credentials in pi-pilot/config/.env before starting.
 docker compose up --build
 ```
 
-The included compose file mounts the project at `/workspace` and stores durable
-state in the `pilot-durable` named volume. `PI_PILOT_DATA_DIR` inside the container
-is `/home/bun/.pi/pilot/durable`. A container restart resumes unfinished work.
+The included compose file mounts the project at `/workspace`; configuration,
+state and attachments remain in `/workspace/pi-pilot` on that bind mount.
+The mounted directory must be writable by the container's `bun` user.
+A container restart resumes unfinished work.
 
 To build only the image:
 
@@ -121,6 +124,8 @@ PI_PILOT_WORKSPACES=/workspace/project-a,/workspace/project-b
 ```
 
 If `PI_PILOT_WORKSPACES` is not set, pi-pilot uses the directory where the process starts. In Docker, set `working_dir` to the mounted workspace or set `PI_PILOT_WORKSPACES` explicitly.
+
+Each workspace has its own model collection, credentials and sessions. Telegram process settings come from the first workspace at startup and stay fixed when switching workspaces. Workspace environment files are read without mutating the process environment. Accepted files remain under their receiving workspace; a delayed file message is rejected if the selected workspace changed before admission.
 
 ## Access Control
 

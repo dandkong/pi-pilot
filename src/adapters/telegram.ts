@@ -1,9 +1,7 @@
 import remend from "remend";
 import { Bot, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import type { Context } from "grammy";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { saveAttachment } from "./attachments.ts";
 import { logger } from "../logger.ts";
 import { chunkText } from "../render/chunking.ts";
 import type {
@@ -35,17 +33,21 @@ type MediaGroupState = {
 
 export class TelegramAdapter implements ChatAdapter {
   private readonly bot: Bot;
-  private readonly messageHandlers: Array<(message: ChatMessage) => Promise<void>> = [];
-  private readonly callbackHandlers: Array<(callback: ChatCallback) => Promise<void>> = [];
+  private readonly messageHandlers: Array<
+    (message: ChatMessage) => Promise<void>
+  > = [];
+  private readonly callbackHandlers: Array<
+    (callback: ChatCallback) => Promise<void>
+  > = [];
   private readonly mediaGroups = new Map<string, MediaGroupState>();
   private started = false;
 
-  private readonly tmpDir: string;
-
-  constructor(token: string, private readonly commands: ChatCommand[] = []) {
+  constructor(
+    token: string,
+    private readonly commands: ChatCommand[] = [],
+    private readonly getWorkspace: () => string = () => process.cwd(),
+  ) {
     this.bot = new Bot(token);
-    this.tmpDir = join(tmpdir(), "pi-pilot");
-    mkdirSync(this.tmpDir, { recursive: true });
     this.bot.on("message:text", async (ctx) => this.handleTextMessage(ctx));
     this.bot.on("message:photo", async (ctx) => this.handleFileMessage(ctx));
     this.bot.on("message:document", async (ctx) => this.handleFileMessage(ctx));
@@ -73,7 +75,7 @@ export class TelegramAdapter implements ChatAdapter {
       await this.bot.api.setMyCommands(this.commands);
     }
     await this.bot.start({ allowed_updates: ["message", "callback_query"] });
-    log.info(`bot started, tmpDir=${this.tmpDir}`);
+    log.info(`bot started, workspace=${this.getWorkspace()}`);
   }
 
   async stop(): Promise<void> {
@@ -84,7 +86,11 @@ export class TelegramAdapter implements ChatAdapter {
     await this.bot.stop();
   }
 
-  async sendMessage(chatId: string, text: string, options?: SendMessageOptions): Promise<SentMessage[]> {
+  async sendMessage(
+    chatId: string,
+    text: string,
+    options?: SendMessageOptions,
+  ): Promise<SentMessage[]> {
     const messageText = text || "(no response)";
     if (options?.render === "markdown") {
       return this.sendRichMarkdownMessages(chatId, messageText, options);
@@ -106,14 +112,24 @@ export class TelegramAdapter implements ChatAdapter {
           index === 0 && options?.replyToMessageId
             ? { message_id: Number(options.replyToMessageId) }
             : undefined,
-        reply_markup: index === chunks.length - 1 ? toInlineKeyboard(options?.buttons) : undefined,
+        reply_markup:
+          index === chunks.length - 1
+            ? toInlineKeyboard(options?.buttons)
+            : undefined,
       };
 
       try {
-        const message = await this.bot.api.sendRichMessage(chatId, { markdown: chunk }, messageOptions);
+        const message = await this.bot.api.sendRichMessage(
+          chatId,
+          { markdown: chunk },
+          messageOptions,
+        );
         sent.push({ messageId: String(message.message_id) });
       } catch (error) {
-        log.warn("rich markdown send failed, retrying as plain text", formatGrammyError(error));
+        log.warn(
+          "rich markdown send failed, retrying as plain text",
+          formatGrammyError(error),
+        );
         const fallback = await this.sendPlainMessages(chatId, chunk, {
           ...options,
           replyToMessageId: index === 0 ? options?.replyToMessageId : undefined,
@@ -126,7 +142,11 @@ export class TelegramAdapter implements ChatAdapter {
     return sent;
   }
 
-  private async sendPlainMessages(chatId: string, text: string, options?: SendMessageOptions): Promise<SentMessage[]> {
+  private async sendPlainMessages(
+    chatId: string,
+    text: string,
+    options?: SendMessageOptions,
+  ): Promise<SentMessage[]> {
     const chunks = chunkText(text, TELEGRAM_MESSAGE_LIMIT);
     const sent: SentMessage[] = [];
     for (const [index, chunk] of chunks.entries()) {
@@ -136,15 +156,27 @@ export class TelegramAdapter implements ChatAdapter {
           index === 0 && options?.replyToMessageId
             ? { message_id: Number(options.replyToMessageId) }
             : undefined,
-        reply_markup: index === chunks.length - 1 ? toInlineKeyboard(options?.buttons) : undefined,
+        reply_markup:
+          index === chunks.length - 1
+            ? toInlineKeyboard(options?.buttons)
+            : undefined,
       };
-      const message = await this.bot.api.sendMessage(chatId, chunk, messageOptions);
+      const message = await this.bot.api.sendMessage(
+        chatId,
+        chunk,
+        messageOptions,
+      );
       sent.push({ messageId: String(message.message_id) });
     }
     return sent;
   }
 
-  async editMessage(chatId: string, messageId: string, text: string, options?: EditMessageOptions): Promise<void> {
+  async editMessage(
+    chatId: string,
+    messageId: string,
+    text: string,
+    options?: EditMessageOptions,
+  ): Promise<void> {
     await this.bot.api.editMessageText(chatId, Number(messageId), text, {
       link_preview_options: { is_disabled: true },
       reply_markup: toInlineKeyboard(options?.buttons),
@@ -155,11 +187,16 @@ export class TelegramAdapter implements ChatAdapter {
     return STREAM_INTERVAL_MS;
   }
 
-  async startTextStream(chatId: string, options?: SendMessageOptions): Promise<ChatTextStream | undefined> {
+  async startTextStream(
+    chatId: string,
+    options?: SendMessageOptions,
+  ): Promise<ChatTextStream | undefined> {
     // Rich messages carry the markdown rendering and allow a much larger body.
     // Plain text is the fallback once rich messages turn out to be rejected.
     let richEnabled = options?.render === "markdown";
-    const chunkLimit = richEnabled ? TELEGRAM_RICH_MARKDOWN_CHUNK_LIMIT : TELEGRAM_MESSAGE_LIMIT;
+    const chunkLimit = richEnabled
+      ? TELEGRAM_RICH_MARKDOWN_CHUNK_LIMIT
+      : TELEGRAM_MESSAGE_LIMIT;
     const messages: Array<{ messageId: string; raw: string }> = [];
 
     const sync = async (text: string, finished = false) => {
@@ -186,7 +223,12 @@ export class TelegramAdapter implements ChatAdapter {
 
         if (existing.raw === chunk) continue;
 
-        const edited = await this.editStreamMessage(chatId, existing.messageId, chunk, richEnabled);
+        const edited = await this.editStreamMessage(
+          chatId,
+          existing.messageId,
+          chunk,
+          richEnabled,
+        );
         if (edited.richFailed) richEnabled = false;
         if (edited.ok) existing.raw = chunk;
       }
@@ -222,7 +264,10 @@ export class TelegramAdapter implements ChatAdapter {
         );
         return { messageId: String(message.message_id), richFailed: false };
       } catch (error) {
-        log.warn("rich stream send failed, falling back to plain text", formatGrammyError(error));
+        log.warn(
+          "rich stream send failed, falling back to plain text",
+          formatGrammyError(error),
+        );
       }
     }
 
@@ -244,11 +289,16 @@ export class TelegramAdapter implements ChatAdapter {
 
     if (rich) {
       try {
-        await this.bot.api.editMessageText(chatId, numericId, { markdown: prepareStreamingMarkdown(raw) });
+        await this.bot.api.editMessageText(chatId, numericId, {
+          markdown: prepareStreamingMarkdown(raw),
+        });
         return { ok: true, richFailed: false };
       } catch (error) {
         if (isMessageNotModified(error)) return { ok: true, richFailed: false };
-        log.warn("rich stream edit failed, falling back to plain text", formatGrammyError(error));
+        log.warn(
+          "rich stream edit failed, falling back to plain text",
+          formatGrammyError(error),
+        );
       }
     }
 
@@ -268,7 +318,11 @@ export class TelegramAdapter implements ChatAdapter {
     await this.bot.api.sendChatAction(chatId, "typing");
   }
 
-  async reactToMessage(chatId: string, messageId: string, emoji: "👀"): Promise<void> {
+  async reactToMessage(
+    chatId: string,
+    messageId: string,
+    emoji: "👀",
+  ): Promise<void> {
     await this.bot.api.setMessageReaction(chatId, Number(messageId), [
       { type: "emoji", emoji },
     ]);
@@ -298,6 +352,7 @@ export class TelegramAdapter implements ChatAdapter {
   private async handleFileMessage(ctx: Context): Promise<void> {
     const message = ctx.message;
     if (!message || message.from?.is_bot) return;
+    const workspace = this.getWorkspace();
 
     const text = message.caption?.trim() ?? "";
     const attachments: ChatAttachment[] = [];
@@ -306,7 +361,13 @@ export class TelegramAdapter implements ChatAdapter {
     if (message.photo) {
       const photo = message.photo.at(-1); // highest resolution
       if (photo) {
-        const attachment = await this.downloadFile(photo.file_id, `photo_${Date.now()}.jpg`, "image/jpeg", photo.file_size);
+        const attachment = await this.downloadFile(
+          workspace,
+          photo.file_id,
+          `photo_${Date.now()}.jpg`,
+          "image/jpeg",
+          photo.file_size,
+        );
         if (attachment) attachments.push(attachment);
       }
     }
@@ -315,7 +376,13 @@ export class TelegramAdapter implements ChatAdapter {
     if (message.document) {
       const doc = message.document;
       const rawName = doc.file_name ?? `file_${Date.now()}`;
-      const attachment = await this.downloadFile(doc.file_id, `${Date.now()}_${rawName}`, doc.mime_type, doc.file_size);
+      const attachment = await this.downloadFile(
+        workspace,
+        doc.file_id,
+        rawName,
+        doc.mime_type,
+        doc.file_size,
+      );
       if (attachment) attachments.push(attachment);
     }
 
@@ -323,7 +390,13 @@ export class TelegramAdapter implements ChatAdapter {
     if (message.video) {
       const video = message.video;
       const rawName = video.file_name ?? `video_${Date.now()}.mp4`;
-      const attachment = await this.downloadFile(video.file_id, `${Date.now()}_${rawName}`, video.mime_type, video.file_size);
+      const attachment = await this.downloadFile(
+        workspace,
+        video.file_id,
+        rawName,
+        video.mime_type,
+        video.file_size,
+      );
       if (attachment) attachments.push(attachment);
     }
 
@@ -331,14 +404,26 @@ export class TelegramAdapter implements ChatAdapter {
     if (message.audio) {
       const audio = message.audio;
       const rawName = audio.file_name ?? `audio_${Date.now()}.mp3`;
-      const attachment = await this.downloadFile(audio.file_id, `${Date.now()}_${rawName}`, audio.mime_type, audio.file_size);
+      const attachment = await this.downloadFile(
+        workspace,
+        audio.file_id,
+        rawName,
+        audio.mime_type,
+        audio.file_size,
+      );
       if (attachment) attachments.push(attachment);
     }
 
     // Handle voice
     if (message.voice) {
       const voice = message.voice;
-      const attachment = await this.downloadFile(voice.file_id, `voice_${Date.now()}.ogg`, voice.mime_type, voice.file_size);
+      const attachment = await this.downloadFile(
+        workspace,
+        voice.file_id,
+        `voice_${Date.now()}.ogg`,
+        voice.mime_type,
+        voice.file_size,
+      );
       if (attachment) attachments.push(attachment);
     }
 
@@ -352,10 +437,15 @@ export class TelegramAdapter implements ChatAdapter {
       username: message.from?.username ?? message.from?.first_name,
       text,
       attachments,
+      workspace,
     };
 
     if (message.media_group_id) {
-      this.enqueueMediaGroup(message.chat.id, message.media_group_id, chatMessage);
+      this.enqueueMediaGroup(
+        message.chat.id,
+        message.media_group_id,
+        chatMessage,
+      );
       return;
     }
 
@@ -365,8 +455,12 @@ export class TelegramAdapter implements ChatAdapter {
     });
   }
 
-  private enqueueMediaGroup(chatId: string | number, mediaGroupId: string, message: ChatMessage): void {
-    const key = `${chatId}:${mediaGroupId}`;
+  private enqueueMediaGroup(
+    chatId: string | number,
+    mediaGroupId: string,
+    message: ChatMessage,
+  ): void {
+    const key = `${message.workspace}:${chatId}:${mediaGroupId}`;
     const existing = this.mediaGroups.get(key);
     if (existing) clearTimeout(existing.timer);
 
@@ -375,7 +469,10 @@ export class TelegramAdapter implements ChatAdapter {
       timer: setTimeout(() => undefined, 0),
     };
     state.messages.push(message);
-    state.timer = setTimeout(() => this.flushMediaGroup(key), MEDIA_GROUP_FLUSH_MS);
+    state.timer = setTimeout(
+      () => this.flushMediaGroup(key),
+      MEDIA_GROUP_FLUSH_MS,
+    );
     this.mediaGroups.set(key, state);
   }
 
@@ -384,7 +481,9 @@ export class TelegramAdapter implements ChatAdapter {
     if (!state) return;
     this.mediaGroups.delete(key);
 
-    const messages = [...state.messages].sort((a, b) => Number(a.messageId) - Number(b.messageId));
+    const messages = [...state.messages].sort(
+      (a, b) => Number(a.messageId) - Number(b.messageId),
+    );
     const first = messages[0];
     if (!first) return;
 
@@ -392,7 +491,9 @@ export class TelegramAdapter implements ChatAdapter {
       .map((message) => message.text.trim())
       .filter(Boolean)
       .join("\n\n");
-    const attachments = messages.flatMap((message) => message.attachments ?? []);
+    const attachments = messages.flatMap(
+      (message) => message.attachments ?? [],
+    );
     if (!attachments.length) return;
 
     this.dispatchMessage({
@@ -402,14 +503,25 @@ export class TelegramAdapter implements ChatAdapter {
     });
   }
 
-  private async downloadFile(fileId: string, fileName: string, mimeType?: string, fileSize?: number): Promise<ChatAttachment | undefined> {
+  private async downloadFile(
+    workspace: string,
+    fileId: string,
+    fileName: string,
+    mimeType?: string,
+    fileSize?: number,
+  ): Promise<ChatAttachment | undefined> {
     const file = await this.bot.api.getFile(fileId);
     if (!file.file_path) return undefined;
 
     const url = `https://api.telegram.org/file/bot${this.bot.token}/${file.file_path}`;
-    const data = await fetch(url).then((r) => r.arrayBuffer());
-    const localPath = join(this.tmpDir, fileName);
-    writeFileSync(localPath, Buffer.from(data));
+    const localPath = await saveAttachment(workspace, fileName, async () => {
+      const response = await fetch(url);
+      if (!response.ok)
+        throw new Error(
+          `Telegram attachment download failed (${response.status})`,
+        );
+      return response.arrayBuffer();
+    });
 
     return { file: localPath, mimeType, fileSize };
   }
@@ -458,7 +570,9 @@ function prepareStreamingMarkdown(text: string): string {
   });
 }
 
-function toInlineKeyboard(buttons: InlineButton[][] | undefined): InlineKeyboard | undefined {
+function toInlineKeyboard(
+  buttons: InlineButton[][] | undefined,
+): InlineKeyboard | undefined {
   if (!buttons?.length) return undefined;
 
   const keyboard = new InlineKeyboard();
@@ -472,7 +586,10 @@ function toInlineKeyboard(buttons: InlineButton[][] | undefined): InlineKeyboard
 }
 
 function isMessageNotModified(error: unknown): boolean {
-  return error instanceof GrammyError && error.description.includes("message is not modified");
+  return (
+    error instanceof GrammyError &&
+    error.description.includes("message is not modified")
+  );
 }
 
 function formatGrammyError(error: unknown): string {
