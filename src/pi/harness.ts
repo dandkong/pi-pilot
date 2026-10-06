@@ -23,15 +23,7 @@ export async function loadWorkspaceRegistry(cwd: string) {
   registry.install(
     defineExtension({
       name: "pilot",
-      sections: [
-        section(
-          "preamble",
-          () =>
-            "You are Pi Pilot, a coding assistant accessed through Telegram. Use the tools to inspect and modify the workspace, verify your work, and give concise replies. Attached files are supplied as local paths.",
-          { tag: false },
-        ),
-        section("cwd", (input) => input.env?.cwd),
-      ],
+      sections: [section("cwd", (input) => input.env?.cwd)],
     }),
   );
   registry.install(createWorkspaceResourcesExtension(cwd));

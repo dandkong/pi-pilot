@@ -187,9 +187,6 @@ export function formatWorkspaceResources(
 ): string | undefined {
   const parts: string[] = [];
   if (resources.instructions.length) {
-    parts.push(
-      "Apply these AGENTS.md instructions in order; instructions closer to the working directory take precedence. Before modifying files in a child directory, check for additional AGENTS.md instructions there.",
-    );
     for (const file of resources.instructions)
       parts.push(
         `<instructions_file path="${escapeXml(file.path)}">\n${file.content}\n</instructions_file>`,
@@ -199,9 +196,6 @@ export function formatWorkspaceResources(
     (skill) => !skill.disableModelInvocation,
   );
   if (visible.length) {
-    parts.push(
-      "When a task matches a skill, read its SKILL.md using the read tool before proceeding. Only the catalog is loaded here. Resolve relative references against the skill's directory and load supporting files as needed. When the user explicitly names a skill, read it first.",
-    );
     parts.push(
       `<available_skills>\n${visible.map((skill) => `  <skill><name>${escapeXml(skill.name)}</name><description>${escapeXml(skill.description)}</description><location>${escapeXml(skill.path)}</location></skill>`).join("\n")}\n</available_skills>`,
     );
@@ -245,5 +239,6 @@ export async function expandSkillPrompt(
       `Unknown skill: ${match[1]}. Use /skills to list available skills.`,
     );
   const { body } = frontmatter(await readFile(skill.path, "utf8"));
-  return `Use the explicitly requested skill ${skill.name}. Resolve relative paths against ${dirname(skill.path)}.\n\n<requested_skill path="${escapeXml(skill.path)}">\n${body}\n</requested_skill>\n\n${match[2] ?? "Follow this skill's instructions."}`;
+  const request = `<requested_skill name="${escapeXml(skill.name)}" path="${escapeXml(skill.path)}" base_dir="${escapeXml(dirname(skill.path))}">\n${body}\n</requested_skill>`;
+  return match[2] ? `${request}\n\n${match[2]}` : request;
 }

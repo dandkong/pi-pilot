@@ -45,8 +45,10 @@ while retaining tool activity, boundaries, errors, and completion. Local sequenc
 watermarks let awaited operations drain their output; no `pilot.delivery` entries
 or other UI synchronization records are written to the transcript.
 
-The registry installs `CodingTools` (`read`, `write`, `edit`, `bash`), the Pilot
-system prompt, and `pilot-resources` for AGENTS.md instructions and skill discovery.
+The registry installs `CodingTools` (`read`, `write`, `edit`, `bash`), a current
+working directory section, and `pilot-resources` for AGENTS.md and skill discovery.
+Pilot has no built-in role or behavior prompt; user files and workspace plugins
+provide instructions. Native durable tool descriptions and summarization remain.
 Resources are refreshed before each model request using durable's prompt sections.
 `WorkspaceExecutionEnv` extends the Node execution environment,
 binding tools to the selected workspace and temporary/spill files to its `.pi-pilot/tmp`.
@@ -62,7 +64,7 @@ With no credentials, `/models` and `/status` remain available to diagnose setup.
 
 | Module                                        | Responsibility                                                                                 |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `src/pi/harness.ts`                           | Registry, system prompt, execution environment, storage policy, and Harness creation           |
+| `src/pi/harness.ts`                           | Registry, cwd metadata, execution environment, storage policy, and Harness creation            |
 | `src/config/paths.ts`, `files.ts`, `settings.ts` | Workspace layout, scoped environment, validated configuration |
 | `src/pi/model-config.ts`, `credentials.ts` | Provider/model composition, profiles, request defaults and atomic file credentials |
 | `src/pi/resources.ts` | Ancestor instructions, skill discovery/catalogs, and explicit skill invocation |

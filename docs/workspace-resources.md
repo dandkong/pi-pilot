@@ -2,7 +2,9 @@
 
 The interoperability directory is **`.agents/skills`** (plural), and the
 instruction file is **`AGENTS.md`**. These are application resources, rather than
-formats automatically loaded by pi-durable.
+formats automatically loaded by pi-durable. Pilot provides their file contents
+and catalog metadata without a built-in role/personality or behavior prompt.
+Put behavioral instructions in AGENTS.md, skills, or a workspace plugin.
 
 ## Instructions
 
@@ -16,9 +18,9 @@ For the test workspace, `D:/Project/workspace/AGENTS.md` is inherited by
 the test workspace for more specific rules. Empty files are omitted; an empty
 override still suppresses that directory's ordinary AGENTS.md.
 
-Files below the working directory are not automatically scanned. The prompt tells
-the model to check for more specific AGENTS.md instructions before modifying files
-in a child directory. Switching workspaces changes the loaded resources.
+Files below the working directory are not automatically scanned. There is no
+built-in instruction telling the model to discover them; put any such workflow
+in your own AGENTS.md. Switching workspaces changes the loaded resources.
 
 ## Skills
 
@@ -60,14 +62,17 @@ Read the relevant code and tests. Use references/checklist.md as the review guid
 ```
 
 Only names, descriptions, and absolute SKILL.md paths enter the system prompt.
-The model uses the native `read` tool to load the skill body when it needs it;
-relative resource paths resolve against the directory containing SKILL.md.
+The model can use the native `read` tool to load skill bodies. The application does
+not inject an instruction to automatically select/read them; define that behavior
+in AGENTS.md or a plugin. Explicit invocation supplies the skill file path and
+base directory as metadata, along with its body and the user's task.
 This follows the [Agent Skills integration convention](https://agentskills.io/client-implementation/adding-skills-support).
 
 `/skills` lists available skills. Send `/skill:review Check the current changes`
 to explicitly load a skill's body into the durable input. Skills with YAML
 `disable-model-invocation: true` are omitted from automatic discovery in the
-prompt, but remain available through `/skills` and explicit invocation.
+prompt, but remain available through `/skills` and explicit invocation. When no
+task text accompanies the invocation, only the requested skill content is supplied.
 
 YAML block descriptions and linked skill directories are supported. Malformed
 skills are skipped with a diagnostic; duplicate names use the precedence above.
