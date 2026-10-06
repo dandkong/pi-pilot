@@ -12,6 +12,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { logger } from "../logger.ts";
 import { workspacePaths } from "../config/paths.ts";
 import { WorkspaceExecutionEnv } from "./execution-env.ts";
+import { createWorkspaceResourcesExtension } from "./resources.ts";
 
 /** The host's durable registry, execution environment and persistence policy. */
 export async function openWorkspaceHarness(
@@ -36,6 +37,7 @@ export async function openWorkspaceHarness(
       ],
     }),
   );
+  registry.install(createWorkspaceResourcesExtension(cwd));
   const storage = await openNodeJsonlStorage(directory, BACKGROUND_CONTEXT, {
     fsync: true,
   });

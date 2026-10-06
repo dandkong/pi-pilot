@@ -7,6 +7,7 @@ import {
 } from "./model-config.ts";
 import { DurableWorkspace } from "./workspace.ts";
 import { compareModels } from "./models.ts";
+import { expandSkillPrompt, loadWorkspaceResources } from "./resources.ts";
 import type {
   AdmittedInput,
   ModelInfo,
@@ -85,7 +86,10 @@ export class PiRunner {
         throw new Error(
           "Workspace changed while receiving this message. Switch back to its workspace and resend it.",
         );
-      return (await this.getWorkspace()).submit(prompt, input);
+      return (await this.getWorkspace()).submit(
+        await expandSkillPrompt(this.currentCwd, prompt),
+        input,
+      );
     });
   }
   async run(prompt: string, options: SubmitOptions = {}): Promise<void> {
@@ -127,6 +131,11 @@ export class PiRunner {
   }
   getWorkspaceDirectory(): string {
     return this.currentCwd;
+  }
+  async getSkills() {
+    return this.operations.run(
+      async () => (await loadWorkspaceResources(this.currentCwd)).skills,
+    );
   }
   async getProfiles() {
     return this.operations.run(async () => {

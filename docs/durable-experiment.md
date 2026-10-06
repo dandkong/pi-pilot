@@ -45,8 +45,10 @@ while retaining tool activity, boundaries, errors, and completion. Local sequenc
 watermarks let awaited operations drain their output; no `pilot.delivery` entries
 or other UI synchronization records are written to the transcript.
 
-The registry installs `CodingTools` (`read`, `write`, `edit`, `bash`) and the Pilot
-system prompt. `WorkspaceExecutionEnv` extends the Node execution environment,
+The registry installs `CodingTools` (`read`, `write`, `edit`, `bash`), the Pilot
+system prompt, and `pilot-resources` for AGENTS.md instructions and skill discovery.
+Resources are refreshed before each model request using durable's prompt sections.
+`WorkspaceExecutionEnv` extends the Node execution environment,
 binding tools to the selected workspace and temporary/spill files to its `pi-pilot/tmp`.
 Each workspace constructs its own pi-ai Models collection from `config/models.json`,
 `config/auth.json`, and its `.env` authentication context. Built-in catalogs remain
@@ -63,6 +65,7 @@ With no credentials, `/models` and `/status` remain available to diagnose setup.
 | `src/pi/harness.ts`                           | Registry, system prompt, execution environment, storage policy, and Harness creation           |
 | `src/config/paths.ts`, `files.ts`, `settings.ts` | Workspace layout, scoped environment, validated configuration |
 | `src/pi/model-config.ts`, `credentials.ts` | Provider/model composition, profiles, request defaults and atomic file credentials |
+| `src/pi/resources.ts` | Ancestor instructions, skill discovery/catalogs, and explicit skill invocation |
 | `src/pi/workspace.ts`                         | Workspace store, selected conversation, durable input/control admission, models, and lifecycle |
 | `src/pi/runner.ts`                            | Small application facade; serialize admissions and lifecycle changes                           |
 | `src/pi/conversation-output.ts`               | Committed-state projection, output sequencing, and snapshot coalescing                         |
@@ -126,8 +129,11 @@ separate feature rather than a transcript synchronization marker.
   `models.json`, `.env`, and `settings.json` are loaded by pipi's own adapter.
   Stored OAuth credentials can be resolved/refreshed by pi-ai, but interactive
   login commands and dynamic model catalog persistence are not implemented.
-- Old pi extension hooks, skills, prompt templates, packages, and automatic resource
-  discovery are not loaded. AGENTS.md files are not automatically added to the prompt.
+- Old pi extension hooks, prompt templates, and packages are not loaded. Native
+  durable extensions use a Registry and must be installed by the application.
+  AGENTS.md inheritance, `.agents/skills` discovery and workspace-private
+  `pi-pilot/skills` are supported by the application resource extension; `/skills`
+  lists them and `/skill:name task` explicitly invokes one.
 - `/delete` is removed: durable has no conversation deletion API. Histories remain
   in the workspace store.
 - `/status` shows the model's context window but reports used context tokens as

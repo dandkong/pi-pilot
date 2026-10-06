@@ -44,6 +44,7 @@ export const CHAT_COMMANDS: ChatCommand[] = [
   { command: "stop", description: "Abort current task" },
   { command: "resume", description: "Resume a previous session" },
   { command: "recent", description: "Show recent session messages" },
+  { command: "skills", description: "List workspace skills" },
   { command: "reload", description: "Reload workspace model configuration" },
   { command: "help", description: "Show available commands" },
   { command: "start", description: "Welcome and quick start" },
@@ -127,6 +128,24 @@ export class ChatCommands {
 
     if (command === "thinking") {
       await this.sendThinkingMenu(message.chatId, message.messageId);
+      return true;
+    }
+
+    if (command === "skills") {
+      const state = await this.getState();
+      const skills = await state.runner.getSkills();
+      await this.adapter.sendMessage(
+        message.chatId,
+        skills.length
+          ? skills
+              .map(
+                (skill) =>
+                  `/skill:${skill.name}${skill.disableModelInvocation ? " (explicit only)" : ""}\n${skill.description}`,
+              )
+              .join("\n\n")
+          : "No skills found. Add .agents/skills/<name>/SKILL.md to your workspace.",
+        { replyToMessageId: message.messageId, render: "plain" },
+      );
       return true;
     }
 
