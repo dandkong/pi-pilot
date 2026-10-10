@@ -1,12 +1,13 @@
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { type ConfigOverrides, type LogLevel, resolveConfigValues } from "./schema.ts";
+import { type ConfigOverrides, type LogLevel, type ToolDisplayMode, resolveConfigValues } from "./schema.ts";
 
 export type RuntimeConfig = {
   telegramToken: string;
   workspaces: string[];
   allowedActorIds: string[];
   defaultTargetId?: string;
+  toolDisplayMode: ToolDisplayMode;
   logLevel: LogLevel;
 };
 
@@ -19,6 +20,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): RuntimeConfig {
     workspaces: parseWorkspaces(values.workspaces),
     allowedActorIds: parseList(values.allowedTelegramUsers),
     defaultTargetId: values.defaultTelegramChatId,
+    toolDisplayMode: requiredValue(values.toolDisplayMode, "PI_PILOT_TOOL_DISPLAY_MODE") as ToolDisplayMode,
     logLevel: requiredValue(values.logLevel, "PI_PILOT_LOG_LEVEL") as LogLevel,
   };
 }

@@ -37,6 +37,7 @@ export class ChatRuntime {
   private state: ChatState | undefined;
   private initPromise: Promise<void> | undefined;
   private currentOutput: ReturnType<typeof createTurnStreamSender> | undefined;
+  private readonly toolMessageCleanups: Array<() => Promise<void>> = [];
   private outputQueue = Promise.resolve();
   private pendingAgentEnd: AgentEndEvent | undefined;
   private queueDrainTimer: Timer | undefined;
@@ -200,7 +201,9 @@ export class ChatRuntime {
         }
         return;
       case "tool_execution_start":
-        await this.getOrCreateOutput()?.pushToolStart(event);
+        if (this.config.toolDisplayMode !== "never") {
+          await this.getOrCreateOutput()?.pushToolStart(event);
+        }
         return;
       case "agent_end":
         // agent_end can be followed by an automatic retry or compaction. Keep
@@ -216,6 +219,7 @@ export class ChatRuntime {
         await output?.finish(
           agentEnd ? extractLastAssistantText(agentEnd.messages) || "(no response)" : "",
         );
+        if (this.config.toolDisplayMode === "during") await this.clearToolMessages();
         this.requestQueueDrain();
         return;
       }
@@ -252,8 +256,24 @@ export class ChatRuntime {
     const target = this.getNotificationTarget("runner output");
     if (!target) return undefined;
 
-    this.currentOutput = createTurnStreamSender(this.adapter, target);
+    this.currentOutput = createTurnStreamSender(
+      this.adapter,
+      target,
+      this.config.toolDisplayMode === "during"
+        ? (cleanup) => this.toolMessageCleanups.push(cleanup)
+        : undefined,
+    );
     return this.currentOutput;
+  }
+
+  private async clearToolMessages(): Promise<void> {
+    for (const cleanup of this.toolMessageCleanups.splice(0)) {
+      try {
+        await cleanup();
+      } catch (error) {
+        log.warn("tool message cleanup failed", error);
+      }
+    }
   }
 
   private async sendCompactionStart(target: ChatTarget, reason: "manual" | "threshold" | "overflow"): Promise<void> {
@@ -390,6 +410,7 @@ export class ChatRuntime {
     // the FIFO start another run before the settled turn is delivered, even
     // when the runner reports a final error.
     await this.outputQueue;
+    if (this.config.toolDisplayMode === "during") await this.clearToolMessages();
 
     if (failed) {
       log.error(`[chat ${message.chatId}] pi failed`, failure);
@@ -402,7 +423,11 @@ export class ChatRuntime {
   }
 }
 
-function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {
+function createTurnStreamSender(
+  adapter: ChatAdapter,
+  target: ChatTarget,
+  registerToolCleanup?: (cleanup: () => Promise<void>) => void,
+) {
   type SegmentKind = "text" | "tool";
 
   let currentOutput: ReturnType<typeof createTextStreamSender> | undefined;
@@ -418,8 +443,10 @@ function createTurnStreamSender(adapter: ChatAdapter, target: ChatTarget) {
     }
 
     currentKind = kind;
-    currentOutput = createTextStreamSender(adapter, target, kind === "tool" ? "plain" : "markdown");
-    return currentOutput;
+    const output = createTextStreamSender(adapter, target, kind === "tool" ? "plain" : "markdown");
+    currentOutput = output;
+    if (kind === "tool") registerToolCleanup?.(() => output.deleteMessages());
+    return output;
   };
 
   const queue = (task: () => Promise<void>) => {
@@ -522,6 +549,14 @@ function createTextStreamSender(adapter: ChatAdapter, target: ChatTarget, render
         return;
       }
       scheduleUpdate();
+    },
+    async deleteMessages(): Promise<void> {
+      if (scheduled) {
+        clearTimeout(scheduled);
+        scheduled = undefined;
+      }
+      await pending;
+      await stream?.deleteMessages?.();
     },
     async finish(fallbackText = ""): Promise<boolean> {
       if (scheduled) {

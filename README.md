@@ -7,6 +7,7 @@ pi-pilot is a Telegram interface for [pi](https://pi.dev/), bringing coding, res
 ## Features
 
 - Stream replies and tool activity back to chat
+- Configure whether tool activity is kept, cleared after a run, or hidden
 - Switch workspaces, models, and recent sessions
 - Use pi extensions, skills, prompts, and persisted sessions
 - Docker deployment support
@@ -47,6 +48,7 @@ TELEGRAM_BOT_TOKEN=123456:your-token
 TELEGRAM_ALLOWED_USERS=123456789
 TELEGRAM_DEFAULT_CHAT_ID=123456789
 PI_PILOT_WORKSPACES=/path/to/project,/path/to/other-project
+PI_PILOT_TOOL_DISPLAY_MODE=always
 PI_PILOT_LOG_LEVEL=info
 ```
 
@@ -74,6 +76,7 @@ pi-pilot \
   --allowed-users 123456789 \
   --default-chat-id 123456789 \
   --workspaces /path/to/project,/path/to/other-project \
+  --tool-display-mode always \
   --log-level info
 ```
 
@@ -85,6 +88,7 @@ Available options:
 | `--workspaces` | `PI_PILOT_WORKSPACES` | Comma-separated workspace paths |
 | `--allowed-users` | `TELEGRAM_ALLOWED_USERS` | Comma-separated Telegram user IDs allowed to interact |
 | `--default-chat-id` | `TELEGRAM_DEFAULT_CHAT_ID` | Default Telegram chat ID for all bot output |
+| `--tool-display-mode` | `PI_PILOT_TOOL_DISPLAY_MODE` | `always` (default), `during` (clear tool messages after a run), or `never` |
 | `--log-level` | `PI_PILOT_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, or `silent` |
 
 ## Docker
@@ -111,6 +115,7 @@ services:
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS}
       TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID}
       PI_PILOT_WORKSPACES: /workspace,/workspace-a
+      PI_PILOT_TOOL_DISPLAY_MODE: always
       PI_PILOT_LOG_LEVEL: info
       TZ: Asia/Shanghai
     volumes:

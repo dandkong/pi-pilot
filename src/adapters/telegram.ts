@@ -200,6 +200,16 @@ export class TelegramAdapter implements ChatAdapter {
       finish: async (text) => {
         await sync(text, true);
       },
+      deleteMessages: async () => {
+        for (const { messageId } of [...messages].reverse()) {
+          try {
+            await this.bot.api.deleteMessage(chatId, Number(messageId));
+          } catch (error) {
+            log.warn("stream message deletion failed", formatGrammyError(error));
+          }
+        }
+        messages.length = 0;
+      },
     };
   }
 

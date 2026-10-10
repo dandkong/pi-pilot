@@ -1,11 +1,14 @@
 export const LOG_LEVELS = ["debug", "info", "warn", "error", "silent"] as const;
+export const TOOL_DISPLAY_MODES = ["always", "during", "never"] as const;
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
+export type ToolDisplayMode = (typeof TOOL_DISPLAY_MODES)[number];
 export type ConfigKey =
   | "telegramToken"
   | "workspaces"
   | "allowedTelegramUsers"
   | "defaultTelegramChatId"
+  | "toolDisplayMode"
   | "logLevel";
 export type ConfigOverrides = Partial<Record<ConfigKey, string>>;
 export type ResolvedConfigValues = Partial<Record<ConfigKey, string>>;
@@ -50,6 +53,19 @@ export const CONFIG_DEFINITIONS: readonly ConfigDefinition[] = [
     flags: ["--default-chat-id"],
     valueName: "chat-id",
     description: "Default Telegram chat ID for all bot output",
+  },
+  {
+    key: "toolDisplayMode",
+    env: "PI_PILOT_TOOL_DISPLAY_MODE",
+    flags: ["--tool-display-mode"],
+    valueName: "mode",
+    description: `Tool display mode (${TOOL_DISPLAY_MODES.join("|")})`,
+    defaultValue: () => "always",
+    validate: (value) => {
+      if (!isToolDisplayMode(value)) {
+        throw new Error(`Invalid PI_PILOT_TOOL_DISPLAY_MODE: ${value}. Use ${TOOL_DISPLAY_MODES.join(", ")}.`);
+      }
+    },
   },
   {
     key: "logLevel",
@@ -101,6 +117,10 @@ export function formatConfigHelpRows(): string[] {
 
 export function isLogLevel(value: string): value is LogLevel {
   return LOG_LEVELS.includes(value as LogLevel);
+}
+
+export function isToolDisplayMode(value: string): value is ToolDisplayMode {
+  return TOOL_DISPLAY_MODES.includes(value as ToolDisplayMode);
 }
 
 function readConfigValue(definition: ConfigDefinition, overrides: ConfigOverrides): string | undefined {

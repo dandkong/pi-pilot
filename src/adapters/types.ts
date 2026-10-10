@@ -13,6 +13,7 @@ export type ChatCommand = {
 export type ChatTextStream = {
   update(text: string): Promise<void>;
   finish(text: string): Promise<void>;
+  deleteMessages?(): Promise<void>;
 };
 
 export type SentMessage = {
