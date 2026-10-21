@@ -628,7 +628,7 @@ function formatPrompt(text: string, attachments?: ChatAttachment[]): string {
 }
 
 const TOOL_ARG_LIMIT = 3;
-const TOOL_SUMMARY_LIMIT = 140;
+const TOOL_SUMMARY_LIMIT = 100;
 const TOOL_VALUE_LIMIT = 60;
 
 function formatToolStart(event: ToolEvent): string {
@@ -697,6 +697,10 @@ function pickString(record: Record<string, unknown>, key: string): string | unde
 
 function truncate(value: string | undefined, limit = TOOL_SUMMARY_LIMIT): string | undefined {
   if (!value) return undefined;
-  return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+  // Tool lines are one Telegram line each: a multi-line command or argument must not
+  // break the activity list. Collapse all whitespace runs, then bound the length.
+  const single = value.replace(/\s+/g, " ").trim();
+  if (!single) return undefined;
+  return single.length > limit ? `${single.slice(0, limit - 3)}...` : single;
 }
 
