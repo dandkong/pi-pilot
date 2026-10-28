@@ -27,7 +27,6 @@ export function formatStatus(status: RunnerStatus, queuedMessages: number): stri
       }`
     : "unknown";
   const session = status.sessionId.slice(0, 8);
-  const cost = status.stats.cost ? `$${status.stats.cost.toFixed(4)}` : "$0";
 
   return [
     "Status",
@@ -42,7 +41,6 @@ export function formatStatus(status: RunnerStatus, queuedMessages: number): stri
     `Tools: ${status.activeTools.length}`,
     `Extensions: ${status.extensionCount}`,
     `Skills: ${status.skillCount}`,
-    `Cost: ${cost}`,
   ].join("\n");
 }
 
