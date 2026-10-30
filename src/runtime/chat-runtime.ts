@@ -60,10 +60,6 @@ export class ChatRuntime {
 
   async handleMessage(message: ChatMessage): Promise<void> {
     if (!this.isAllowedUser(message.userId)) {
-      log.warn(`[chat ${message.chatId}] rejected unauthorized user`, {
-        userId: message.userId,
-        username: message.username,
-      });
       await this.adapter.sendMessage(
         message.chatId,
         `Unauthorized user: ${message.userId}`,
@@ -85,9 +81,6 @@ export class ChatRuntime {
 
   async handleCallback(callback: ChatCallback): Promise<void> {
     if (!this.isAllowedUser(callback.userId)) {
-      log.warn(`[chat ${callback.chatId}] rejected unauthorized callback`, {
-        userId: callback.userId,
-      });
       await this.adapter.answerCallback(callback, "Unauthorized user");
       return;
     }

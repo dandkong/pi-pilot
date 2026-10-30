@@ -313,21 +313,9 @@ class Workspace {
     this.unsubscribeSession?.();
     this.unsubscribeSession = session.subscribe((event) => {
       this.outputCallback?.(event);
-
-      logAgentEvent(event);
     });
 
-    const skills = session.resourceLoader.getSkills().skills;
-    const extensions = session.resourceLoader.getExtensions().extensions;
-    log.info("session initialized", {
-      cwd: this.cwd,
-      sessionId: session.sessionId,
-      model: session.model ? `${session.model.provider}/${session.model.name}` : undefined,
-      thinkingLevel: session.thinkingLevel,
-      activeTools: formatList(session.getActiveToolNames()),
-      extensions: formatList(extensions.map((extension) => extension.path)),
-      skills: formatList(skills.map((skill) => skill.name)),
-    });
+    log.info("Pi session initialized");
   }
 
   private logDiagnostics(runtime: AgentSessionRuntime): void {
@@ -513,10 +501,6 @@ function createTrustedSettingsManager(cwd: string): SettingsManager {
   return SettingsManager.create(cwd, undefined, { projectTrusted: true });
 }
 
-function formatList(items: string[]): string {
-  return items.length ? items.join(", ") : "(none)";
-}
-
 function toRecentMessage(message: unknown): RecentMessage | undefined {
   if (!message || typeof message !== "object" || !("role" in message)) return undefined;
   const record = message as Record<string, unknown>;
@@ -559,35 +543,6 @@ function contentToText(content: unknown): string {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
-}
-
-function logAgentEvent(event: unknown): void {
-  if (!event || typeof event !== "object" || !("type" in event)) return;
-  const typedEvent = event as Record<string, unknown>;
-  const type = typedEvent.type;
-
-  if (type === "tool_execution_start") {
-    log.info("tool start", {
-      toolName: typedEvent.toolName,
-      toolCallId: typedEvent.toolCallId,
-      args: typedEvent.args,
-    });
-    return;
-  }
-
-  if (type === "tool_execution_end") {
-    log.info("tool end", {
-      toolName: typedEvent.toolName,
-      toolCallId: typedEvent.toolCallId,
-      isError: typedEvent.isError,
-      result: typedEvent.result,
-    });
-    return;
-  }
-
-  if (type === "auto_retry_start" || type === "auto_retry_end" || type === "compaction" || type === "compaction_end") {
-    log.info(String(type), typedEvent);
-  }
 }
 
 function compareModels(a: ModelInfo, b: ModelInfo): number {

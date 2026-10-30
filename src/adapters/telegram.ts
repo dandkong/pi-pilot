@@ -74,7 +74,7 @@ export class TelegramAdapter implements ChatAdapter {
       await this.bot.api.setMyCommands(this.commands);
     }
     await this.bot.start({ allowed_updates: ["message", "callback_query"] });
-    log.info(`bot started, tmpDir=${this.tmpDir}`);
+    log.info("Telegram bot started");
   }
 
   async stop(): Promise<void> {
