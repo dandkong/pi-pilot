@@ -7,6 +7,7 @@ pi-pilot is a Telegram interface for [pi](https://pi.dev/), bringing coding, res
 ## Features
 
 - Stream replies and tool activity back to chat
+- Include quoted Telegram replies as context in your request
 - Configure whether tool activity is kept, cleared after a run, or hidden
 - Switch workspaces, models, and recent sessions
 - Use pi extensions, skills, prompts, and persisted sessions

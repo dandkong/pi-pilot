@@ -1,6 +1,7 @@
 import remend from "remend";
 import { Bot, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import type { Context } from "grammy";
+import type { Message as TelegramMessage, RichBlock, RichText } from "grammy/types";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -300,6 +301,7 @@ export class TelegramAdapter implements ChatAdapter {
       userId: String(message.from?.id ?? message.chat.id),
       username: message.from?.username ?? message.from?.first_name,
       text,
+      replyText: getTelegramReplyText(message),
     };
 
     this.dispatchMessage(chatMessage);
@@ -361,6 +363,7 @@ export class TelegramAdapter implements ChatAdapter {
       userId: String(message.from?.id ?? message.chat.id),
       username: message.from?.username ?? message.from?.first_name,
       text,
+      replyText: getTelegramReplyText(message),
       attachments,
     };
 
@@ -457,6 +460,47 @@ export class TelegramAdapter implements ChatAdapter {
       });
     }
   }
+}
+
+function getTelegramReplyText(message: TelegramMessage): string | undefined {
+  const reply = message.reply_to_message;
+  return [message.quote?.text, reply?.text, reply?.caption,
+    reply?.rich_message && richBlocksToPlainText(reply.rich_message.blocks)]
+    .find((text): text is string => typeof text === "string" && !!text.trim());
+}
+
+function richTextToPlainText(value: RichText): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(richTextToPlainText).join("");
+  if ("text" in value) return richTextToPlainText(value.text);
+  if (value.type === "custom_emoji") return value.alternative_text;
+  if (value.type === "mathematical_expression") return value.expression;
+  return "";
+}
+
+function richBlockToPlainText(block: RichBlock): string {
+  switch (block.type) {
+    case "paragraph": case "heading": case "pre": case "footer":
+      return richTextToPlainText(block.text);
+    case "mathematical_expression":
+      return block.expression;
+    case "blockquote": case "collage": case "slideshow":
+      return richBlocksToPlainText(block.blocks);
+    case "expandable_blockquote": case "pullquote":
+      return richTextToPlainText(block.text);
+    case "list":
+      return block.items.map(item => [item.label, richBlocksToPlainText(item.blocks)].filter(Boolean).join(" ")).join("\n");
+    case "table":
+      return block.cells.map(row => row.map(cell => cell.text ? richTextToPlainText(cell.text) : "").join(" | ")).join("\n");
+    case "details":
+      return [richTextToPlainText(block.summary), richBlocksToPlainText(block.blocks)].filter(Boolean).join("\n\n");
+    default:
+      return "";
+  }
+}
+
+function richBlocksToPlainText(blocks: readonly RichBlock[]): string {
+  return blocks.map(richBlockToPlainText).filter(Boolean).join("\n\n");
 }
 
 function prepareStreamingMarkdown(text: string): string {

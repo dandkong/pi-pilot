@@ -11,6 +11,7 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { logger } from "../logger.ts";
 import { PiRunner, type ToolEvent } from "../pi/runner.ts";
 import { ChatCommands } from "./chat-commands.ts";
+import { withTelegramQuote } from "./telegram-quote.ts";
 
 const log = logger.child("runtime");
 
@@ -75,10 +76,11 @@ export class ChatRuntime {
 
     if (await this.commands.handleMessage(routedMessage)) return;
 
-    const prompt = formatPrompt(message.text.trim(), message.attachments);
+    const text = withTelegramQuote(routedMessage.text, routedMessage.replyText);
+    const prompt = formatPrompt(text.trim(), routedMessage.attachments);
     if (!prompt) return;
 
-    await this.enqueueMessage(routedMessage);
+    await this.enqueueMessage({ ...routedMessage, text, replyText: undefined });
   }
 
   async handleCallback(callback: ChatCallback): Promise<void> {

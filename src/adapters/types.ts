@@ -33,6 +33,7 @@ export type ChatMessage = {
   userId: string;
   username?: string;
   text: string;
+  replyText?: string;
   attachments?: ChatAttachment[];
 };
 
