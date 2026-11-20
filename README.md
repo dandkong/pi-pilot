@@ -152,6 +152,8 @@ PI_PILOT_WORKSPACES=/workspace/project-a,/workspace/project-b
 
 If `PI_PILOT_WORKSPACES` is not set, pi-pilot uses the directory where the process starts. In Docker, set `working_dir` to the mounted workspace or set `PI_PILOT_WORKSPACES` explicitly.
 
+Pi Pilot remembers its selected session for each workspace in `pi-pilot.json` in Pi's agent directory. If no selection exists, or the saved session cannot be restored, it starts a new session rather than picking the most recently modified Pi session. The first time after upgrading, use `/resume` to select an existing session. Persist the agent directory across restarts.
+
 ## Access Control
 
 Set `TELEGRAM_ALLOWED_USERS` to a comma-separated list of Telegram user IDs allowed to interact:

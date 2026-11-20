@@ -1,4 +1,6 @@
-import { rm } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import {
   type AgentSession,
   AgentSessionRuntime,
@@ -263,7 +265,7 @@ class Workspace {
    * below for each replacement, so replaced sessions get fresh cwd-bound services.
    */
   private async createInitialRuntime(): Promise<void> {
-    const sessionManager = SessionManager.continueRecent(this.cwd);
+    const sessionManager = await restoreSession(this.cwd);
     const runtime = await createAgentSessionRuntime(this.createRuntimeFactory(), {
       cwd: this.cwd,
       agentDir: getAgentDir(),
@@ -327,6 +329,13 @@ class Workspace {
       this.outputCallback?.(event);
     });
 
+    if (session.sessionFile) {
+      try {
+        await saveSession(this.cwd, session.sessionFile);
+      } catch (error) {
+        log.warn("Could not save Pi Pilot session selection", error);
+      }
+    }
     log.info("Pi session initialized");
   }
 
@@ -505,6 +514,65 @@ export class PiRunner {
     }
     return this.modelRuntimePromise;
   }
+}
+
+// Only the current selection is stored here; Pi owns the session files themselves.
+async function readPilotState(): Promise<Record<string, unknown>> {
+  let text: string;
+  try {
+    text = await readFile(join(getAgentDir(), "pi-pilot.json"), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+  const state: unknown = JSON.parse(text);
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    throw new Error("Invalid pi-pilot.json");
+  }
+  return state as Record<string, unknown>;
+}
+
+async function restoreSession(cwd: string): Promise<SessionManager> {
+  try {
+    const state = await readPilotState();
+    const sessions = state.sessions;
+    const path = sessions && typeof sessions === "object" && !Array.isArray(sessions)
+      ? (sessions as Record<string, unknown>)[cwd] : undefined;
+    if (typeof path === "string") {
+      // open() can create a manager for a missing file; check the file first.
+      await readFile(path, "utf8");
+      const manager = SessionManager.open(path, undefined, cwd);
+      if (manager.getHeader()?.cwd !== cwd) throw new Error("Saved session belongs to another workspace or is invalid");
+      return manager;
+    }
+  } catch (error) {
+    log.warn("Could not restore Pi Pilot session; starting a new session", error);
+  }
+  return SessionManager.create(cwd);
+}
+
+let pendingStateWrite: Promise<void> = Promise.resolve();
+async function saveSession(cwd: string, path: string): Promise<void> {
+  const operation = pendingStateWrite.then(async () => {
+    const state = await readPilotState();
+    const sessions = state.sessions;
+    if (sessions !== undefined && (!sessions || typeof sessions !== "object" || Array.isArray(sessions))) {
+      throw new Error("Invalid sessions in pi-pilot.json");
+    }
+    state.sessions = { ...(sessions as Record<string, unknown> | undefined), [cwd]: path };
+    const agentDir = getAgentDir();
+    await mkdir(agentDir, { recursive: true });
+    const target = join(agentDir, "pi-pilot.json");
+    const temp = `${target}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+      await rename(temp, target);
+    } finally {
+      await rm(temp, { force: true });
+    }
+  });
+  pendingStateWrite = operation.catch(() => {});
+  await operation;
 }
 
 function createTrustedSettingsManager(cwd: string): SettingsManager {
