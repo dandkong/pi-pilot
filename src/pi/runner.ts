@@ -6,6 +6,9 @@ import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
+  createCodemodeExtension,
+  createMcpExtension,
+  createToolSearchExtension,
   getAgentDir,
   ModelRuntime,
   SessionManager,
@@ -282,9 +285,18 @@ class Workspace {
         agentDir,
         settingsManager: createTrustedSettingsManager(cwd),
         modelRuntime: this.modelRuntime,
+        resourceLoaderOptions: {
+          extensionFactories: [
+            { name: "codemode", factory: createCodemodeExtension(), replaceable: true, builtin: true },
+            { name: "tool-search", factory: createToolSearchExtension(), replaceable: true, builtin: true },
+            { name: "mcp", factory: createMcpExtension(), replaceable: true, builtin: true },
+          ],
+        },
       });
       return {
-        ...(await createAgentSessionFromServices({ services, sessionManager, sessionStartEvent })),
+        ...(await createAgentSessionFromServices({
+          services, sessionManager, sessionStartEvent, tools: ["+codemode", "+tool_search"],
+        })),
         services,
         diagnostics: services.diagnostics,
       };

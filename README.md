@@ -11,6 +11,7 @@ pi-pilot is a Telegram interface for [pi](https://pi.dev/), bringing coding, res
 - Configure whether tool activity is kept, cleared after a run, or hidden
 - Switch workspaces, models, and recent sessions
 - Use pi extensions, skills, prompts, and persisted sessions
+- Connect configured MCP servers and use `codemode` and `tool_search` by default
 - Docker deployment support
 
 ## Prerequisites
@@ -18,6 +19,8 @@ pi-pilot is a Telegram interface for [pi](https://pi.dev/), bringing coding, res
 Install and configure [pi](https://pi.dev/) first. pi-pilot reuses its model settings, credentials, sessions, extensions, skills, and prompts.
 
 For Docker, mount the agent data directory to `/home/bun/.pi/agent`.
+
+pi-pilot loads Pi's MCP, `codemode`, and `tool_search` extensions for every session. MCP servers are read from the agent directory's `mcp.json` and a trusted workspace's `.pi/mcp.json`; server credentials stay in the agent directory or environment. `codemode` and `tool_search` are enabled by default alongside the configured tools, even when no MCP server is configured. MCP tool exposure and per-server descriptions follow Pi's settings: by default tools are hidden from direct declarations, discoverable through `codemode` or `tool_search`, and enabled servers are summarized in the prompt. A configured server `description`, or otherwise the first line of server instructions after connection, supplies the summary.
 
 ## Commands
 
