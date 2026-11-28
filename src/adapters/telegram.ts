@@ -484,9 +484,9 @@ function richBlockToPlainText(block: RichBlock): string {
       return richTextToPlainText(block.text);
     case "mathematical_expression":
       return block.expression;
-    case "blockquote": case "collage": case "slideshow":
+    case "blockquote": case "expandable_blockquote": case "collage": case "slideshow":
       return richBlocksToPlainText(block.blocks);
-    case "expandable_blockquote": case "pullquote":
+    case "pullquote":
       return richTextToPlainText(block.text);
     case "list":
       return block.items.map(item => [item.label, richBlocksToPlainText(item.blocks)].filter(Boolean).join(" ")).join("\n");

@@ -12,13 +12,13 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.4",
+    "@types/bun": "^1.4.5",
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^1.6.1",
-    "grammy": "^1.46.0",
-    "remend": "^1.4.0"
+    "@earendil-works/pi-coding-agent": "^1.7.0",
+    "grammy": "^1.48.0",
+    "remend": "^1.5.1"
   },
   "overrides": {
     "ws": "^8.21.3",
